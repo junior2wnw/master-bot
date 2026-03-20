@@ -99,29 +99,69 @@ async def search_items(
     profession_id: int | None = None,
     limit: int = 20,
 ) -> list[ServiceItem]:
-    """Search service items by name, aliases, hashtags, and search_text.
+    """Search service items using pg_trgm similarity + ILIKE fallback.
 
-    Uses ILIKE for simplicity. For production scale, switch to
-    PostgreSQL full-text search (tsvector/tsquery) or trigram similarity.
+    Uses trigram GIN indexes (ix_service_items_search_trgm, ix_service_items_name_trgm)
+    for fast fuzzy matching. Falls back to ILIKE on text fields for broad coverage.
+    Results ranked: exact match > trigram similarity > popular > sort order.
     """
-    pattern = f"%{query.lower()}%"
+    clean_query = query.strip().lower()
+
+    # Trigram similarity threshold (pg_trgm)
+    # word_similarity is better for substring matching than similarity()
+    trgm_score = func.greatest(
+        func.coalesce(func.word_similarity(clean_query, ServiceItem.name), 0),
+        func.coalesce(func.word_similarity(clean_query, ServiceItem.search_text), 0),
+    )
+
+    q = (
+        select(ServiceItem, trgm_score.label("score"))
+        .where(
+            ServiceItem.is_active == True,
+            or_(
+                func.word_similarity(clean_query, ServiceItem.name) > 0.2,
+                func.word_similarity(clean_query, ServiceItem.search_text) > 0.2,
+                func.lower(ServiceItem.aliases).contains(clean_query),
+                func.lower(ServiceItem.hashtags).contains(clean_query),
+                func.lower(ServiceItem.code).contains(clean_query),
+            ),
+        )
+        .order_by(
+            trgm_score.desc(),
+            ServiceItem.is_popular.desc(),
+            ServiceItem.sort_order,
+        )
+        .limit(limit)
+    )
+    if profession_id:
+        q = q.where(ServiceItem.profession_id == profession_id)
+
+    result = await session.execute(q)
+    return [row[0] for row in result.all()]
+
+
+async def search_items_simple(
+    session: AsyncSession,
+    query: str,
+    *,
+    profession_id: int | None = None,
+    limit: int = 20,
+) -> list[ServiceItem]:
+    """ILIKE-based search fallback (works without pg_trgm extension)."""
+    clean_query = query.strip().lower()
     q = (
         select(ServiceItem)
         .where(
             ServiceItem.is_active == True,
             or_(
-                func.lower(ServiceItem.name).contains(query.lower()),
-                func.lower(ServiceItem.aliases).contains(query.lower()),
-                func.lower(ServiceItem.hashtags).contains(query.lower()),
-                func.lower(ServiceItem.search_text).contains(query.lower()),
-                func.lower(ServiceItem.code).contains(query.lower()),
+                func.lower(ServiceItem.name).contains(clean_query),
+                func.lower(ServiceItem.aliases).contains(clean_query),
+                func.lower(ServiceItem.hashtags).contains(clean_query),
+                func.lower(ServiceItem.search_text).contains(clean_query),
+                func.lower(ServiceItem.code).contains(clean_query),
             ),
         )
-        .order_by(
-            # Popular items first, then by sort order
-            ServiceItem.is_popular.desc(),
-            ServiceItem.sort_order,
-        )
+        .order_by(ServiceItem.is_popular.desc(), ServiceItem.sort_order)
         .limit(limit)
     )
     if profession_id:

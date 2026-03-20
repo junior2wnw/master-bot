@@ -71,16 +71,24 @@ def create_app() -> FastAPI:
 
 
 async def start_bot() -> None:
-    """Start Telegram bot polling."""
+    """Start Telegram bot polling + notification worker."""
     settings = get_settings()
     if not settings.bot_token or settings.bot_token == "your_telegram_bot_token_here":
         logging.getLogger(__name__).warning("BOT_TOKEN not set, skipping Telegram bot")
         return
 
     from app.bot.app import create_bot
+    from app.services.notification_dispatcher import notification_worker, set_bot
+
     bot, dp = create_bot()
+    set_bot(bot)
+
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # Run bot polling and notification worker concurrently
+        await asyncio.gather(
+            dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()),
+            notification_worker(interval=10.0),
+        )
     finally:
         await bot.session.close()
 

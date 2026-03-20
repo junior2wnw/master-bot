@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from app.bot.handlers import admin, client, master, owner, senior, start
+from app.bot.handlers import admin, client, master, order, owner, senior, start
 from app.bot.middleware import DatabaseMiddleware, ThrottleMiddleware
 from app.config import get_settings
 
@@ -30,6 +30,7 @@ def create_bot() -> tuple[Bot, Dispatcher]:
     dp.include_router(admin.router)
     dp.include_router(senior.router)
     dp.include_router(master.router)
+    dp.include_router(order.router)
     dp.include_router(client.router)
 
     return bot, dp

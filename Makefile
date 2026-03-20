@@ -1,4 +1,4 @@
-.PHONY: up down logs restart build migrate seed test lint fmt shell db-shell
+.PHONY: up down logs restart build migrate seed import-catalog test lint fmt shell db-shell setup
 
 up:
 	docker compose up -d --build
@@ -44,6 +44,12 @@ db-shell:
 
 health:
 	curl -s http://localhost:8000/health | python -m json.tool
+
+import-catalog:
+	docker compose exec app python -m scripts.import_catalog $(file)
+
+setup:
+	sudo bash deploy/setup.sh $(ARGS)
 
 dev:
 	uvicorn app.main:create_app --factory --reload --host 0.0.0.0 --port 8000
