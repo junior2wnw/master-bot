@@ -20,7 +20,10 @@ class User(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     # Relationships
-    roles: Mapped[list["UserRole"]] = relationship(back_populates="user", lazy="selectin")
+    roles: Mapped[list["UserRole"]] = relationship(
+        back_populates="user", lazy="selectin",
+        foreign_keys="UserRole.user_id",
+    )
     branch_memberships: Mapped[list["BranchMember"]] = relationship(
         "BranchMember", back_populates="user", lazy="selectin",
         foreign_keys="BranchMember.user_id",
