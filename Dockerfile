@@ -13,7 +13,8 @@ RUN apt-get update && \
 COPY pyproject.toml ./
 COPY app/ ./app/
 
-RUN pip install --no-cache-dir ".[prod]"
+RUN pip install --no-cache-dir --upgrade pip setuptools && \
+    pip install --no-cache-dir ".[prod]"
 
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/

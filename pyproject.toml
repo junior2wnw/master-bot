@@ -49,5 +49,5 @@ python_files = "test_*.py"
 quote-style = "double"
 
 [build-system]
-requires = ["setuptools>=75.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
