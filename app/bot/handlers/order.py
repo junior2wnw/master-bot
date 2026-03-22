@@ -36,22 +36,26 @@ async def cb_my_orders(callback: CallbackQuery, session: AsyncSession) -> None:
     orders = await get_orders_for_user(session, user, limit=10)
 
     kb = InlineKeyboardBuilder()
-    if not orders:
-        text = "📝 <b>Мои заказы</b>\n\nУ вас пока нет заказов."
-    else:
-        lines = ["📝 <b>Мои заказы</b>\n"]
+
+    if orders:
+        text = "📝 <b>Мои заказы</b>\n"
         for o in orders:
             emoji = _status_emoji(o.status)
-            label = f"{emoji} Заказ #{o.id} — {_status_ru(o.status)}"
+            label = f"{emoji} #{o.id} — {_status_ru(o.status)}"
+            if o.address:
+                label += f" · {o.address[:20]}"
             kb.row(InlineKeyboardButton(text=label, callback_data=f"order_view:{o.id}"))
+    else:
+        text = (
+            "📝 <b>Мои заказы</b>\n\n"
+            "У вас пока нет заказов.\n"
+            "Создайте первый через кнопку ниже."
+        )
 
     kb.row(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
-    kb.row(InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu"))
+    kb.row(InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu"))
 
-    await callback.message.edit_text(
-        text if not orders else "\n".join(lines) if 'lines' in dir() else "📝 <b>Мои заказы</b>",
-        reply_markup=kb.as_markup(),
-    )
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
 
 
@@ -121,16 +125,12 @@ async def msg_order_notes(message: Message, state: FSMContext, session: AsyncSes
         notes=notes,
     )
 
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="📤 Отправить", callback_data=f"order_submit:{order.id}"))
-    kb.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"order_cancel:{order.id}"))
+    from app.bot import messages as msg
+    from app.bot.keyboards import order_actions
 
     await message.answer(
-        f"✅ Заказ #{order.id} создан!\n\n"
-        f"📍 Адрес: {order.address}\n"
-        f"📝 Описание: {notes or 'не указано'}\n\n"
-        "Отправить заказ в обработку?",
-        reply_markup=kb.as_markup(),
+        msg.order_created(order.id, order.address, notes),
+        reply_markup=order_actions(order.id, "draft"),
     )
     await state.clear()
 
@@ -147,42 +147,26 @@ async def cb_view_order(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    emoji = _status_emoji(order.status)
+    is_master = user and (has_role(user, Role.MASTER) or has_role(user, Role.SENIOR_MASTER))
 
     text = (
-        f"{emoji} <b>Заказ #{order.id}</b>\n\n"
-        f"Статус: {_status_ru(order.status)}\n"
-        f"📍 Адрес: {order.address or 'не указан'}\n"
-        f"📝 Описание: {order.notes or '—'}\n"
-        f"⏰ Срочность: {_urgency_ru(order.urgency)}\n"
+        f"<b>Заказ #{order.id}</b>\n"
+        f"{'─' * 24}\n"
+        f"Статус: {_status_emoji(order.status)} {_status_ru(order.status)}\n"
+        f"Адрес: {order.address or 'не указан'}\n"
+        f"Описание: {order.notes or '—'}\n"
+        f"Срочность: {_urgency_ru(order.urgency)}\n"
     )
     if order.master:
-        text += f"🔧 Мастер: {order.master.display_name}\n"
+        text += f"Мастер: {order.master.display_name}\n"
     if order.cancellation_reason:
-        text += f"❌ Причина отмены: {order.cancellation_reason}\n"
+        text += f"Причина отмены: {order.cancellation_reason}\n"
 
-    kb = InlineKeyboardBuilder()
-
-    # Actions based on status and role
-    is_master = user and (has_role(user, Role.MASTER) or has_role(user, Role.SENIOR_MASTER))
-    is_admin = user and (has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER))
-
-    if order.status == "draft":
-        kb.row(InlineKeyboardButton(text="📤 Отправить", callback_data=f"order_submit:{order.id}"))
-    if order.status == "submitted" and (is_master or is_admin):
-        kb.row(InlineKeyboardButton(text="✋ Взять заказ", callback_data=f"order_assign:{order.id}"))
-    if order.status == "assigned" and is_master:
-        kb.row(InlineKeyboardButton(text="🔨 Начать работу", callback_data=f"order_start:{order.id}"))
-    if order.status == "in_progress" and is_master:
-        kb.row(InlineKeyboardButton(text="✅ Завершить", callback_data=f"order_complete:{order.id}"))
-    if order.status == "completed":
-        kb.row(InlineKeyboardButton(text="💳 Оплата", callback_data=f"order_pay:{order.id}"))
-    if order.status not in ("paid", "cancelled", "completed"):
-        kb.row(InlineKeyboardButton(text="❌ Отменить", callback_data=f"order_cancel:{order.id}"))
-
-    kb.row(InlineKeyboardButton(text="◀️ Назад", callback_data="my_orders"))
-
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    from app.bot.keyboards import order_actions
+    await callback.message.edit_text(
+        text,
+        reply_markup=order_actions(order.id, order.status, is_master=is_master),
+    )
     await callback.answer()
 
 

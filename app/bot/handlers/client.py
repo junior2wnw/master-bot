@@ -1,6 +1,7 @@
 """Client-facing bot handlers: catalog browsing, search, voice intake."""
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,8 +96,13 @@ async def cb_search_prompt(callback: CallbackQuery, session: AsyncSession) -> No
 
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def msg_search(message: Message, session: AsyncSession) -> None:
-    """Handle text messages as search queries."""
+async def msg_search(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    """Handle free text as search queries. Only when no FSM state is active."""
+    # Don't intercept messages meant for FSM states (order address, discount, etc.)
+    current_state = await state.get_state()
+    if current_state is not None:
+        return
+
     query = message.text.strip()
     if len(query) < 2:
         return

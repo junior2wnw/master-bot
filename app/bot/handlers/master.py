@@ -24,6 +24,48 @@ class EstimateStates(StatesGroup):
     discount_reason = State()
 
 
+@router.callback_query(F.data == "my_earnings")
+async def cb_my_earnings(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show master's earnings summary."""
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user or not has_role(user, Role.MASTER):
+        await callback.answer("Доступно только мастерам", show_alert=True)
+        return
+
+    from app.models.order import Order, Payment
+    from sqlalchemy import func
+
+    # Completed and paid orders
+    completed = await session.execute(
+        select(func.count(Order.id))
+        .where(Order.master_id == user.id, Order.status.in_(["completed", "paid"]))
+    )
+    completed_count = completed.scalar() or 0
+
+    total_earned = await session.execute(
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .join(Order, Payment.order_id == Order.id)
+        .where(Order.master_id == user.id, Payment.status == "confirmed")
+    )
+    total = total_earned.scalar() or 0
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Главное меню", callback_data="main_menu"))
+
+    await callback.message.edit_text(
+        f"<b>Мои доходы</b>\n"
+        f"{'─' * 28}\n"
+        f"Выполнено заказов: <b>{completed_count}</b>\n"
+        f"Подтверждённый доход: <b>{total:,.0f}₽</b>\n"
+        f"{'─' * 28}\n"
+        f"<i>Детализация по периодам — в разработке</i>",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "my_estimates")
 async def cb_my_estimates(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_user_by_telegram_id(session, callback.from_user.id)
