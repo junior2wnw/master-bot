@@ -53,6 +53,14 @@ async def get_or_create_user(
     session.add(client_role)
     await session.flush()
 
+    # Auto-assign owner + admin if this is the configured owner
+    from app.config import get_settings
+    settings = get_settings()
+    if settings.owner_telegram_id and telegram_id == settings.owner_telegram_id:
+        for role_code in (Role.PRODUCT_OWNER.value, Role.ADMIN.value):
+            session.add(UserRole(user_id=user.id, role_code=role_code))
+        await session.flush()
+
     # Reload roles
     await session.refresh(user, ["roles"])
 
