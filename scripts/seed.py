@@ -152,12 +152,12 @@ async def seed() -> None:
 
         # Сантехника — sample items
         pl_items = [
-            (10, "smesiteli", "Смесители", "ustanovka", "Установка",
+            (10, "smesiteli", "Смесители", "ustanovka_smesiteli", "Установка",
              "PL-MIX-SINK", "ustanovka_smesitelya_rakoviny", "Установка смесителя на раковину",
              "шт", 800, 1500, 1150, "atomic", "PER_UNIT", "quantity", "basic", "HIGH",
              "поставить смеситель, кран", "#сантехника #смеситель",
              "#INSTALL_MIXER", "mixer_type", True),
-            (20, "unitazy", "Унитазы", "ustanovka", "Установка",
+            (20, "unitazy", "Унитазы", "ustanovka_unitazy", "Установка",
              "PL-WC-FLOOR", "ustanovka_napolnogo_unitaza", "Установка напольного унитаза",
              "шт", 1800, 3500, 2650, "atomic", "PER_UNIT", "quantity", "std", "HIGH",
              "поставить унитаз", "#сантехника #унитаз",
@@ -167,7 +167,7 @@ async def seed() -> None:
              "шт", 2500, 4500, 3500, "atomic", "PER_UNIT", "quantity", "complex", "HIGH",
              "монтаж акриловой ванны", "#сантехника #ванна",
              "#INSTALL_BATH", "bath_size", True),
-            (40, "vodonagrevateli", "Водонагреватели", "ustanovka", "Установка",
+            (40, "vodonagrevateli", "Водонагреватели", "ustanovka_vodonagr", "Установка",
              "PL-WH-INSTALL", "ustanovka_vodonagrevatelya", "Установка накопительного водонагревателя",
              "шт", 2000, 4000, 3000, "atomic", "PER_UNIT", "quantity", "complex", "HIGH",
              "монтаж бойлера", "#сантехника #бойлер #водонагреватель",
