@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineQuery, Message
 
 from app.database import get_async_session
 
@@ -15,8 +15,8 @@ class DatabaseMiddleware(BaseMiddleware):
 
     async def __call__(
         self,
-        handler: Callable[[Message | CallbackQuery, dict[str, Any]], Awaitable[Any]],
-        event: Message | CallbackQuery,
+        handler: Callable[[Message | CallbackQuery | InlineQuery, dict[str, Any]], Awaitable[Any]],
+        event: Message | CallbackQuery | InlineQuery,
         data: dict[str, Any],
     ) -> Any:
         async with get_async_session()() as session:

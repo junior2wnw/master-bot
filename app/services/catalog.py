@@ -140,6 +140,53 @@ async def search_items(
     return [row[0] for row in result.all()]
 
 
+async def get_groups_with_counts(
+    session: AsyncSession, profession_id: int, active_only: bool = True
+) -> list[dict]:
+    """Get groups with item counts."""
+    groups = await get_groups(session, profession_id, active_only)
+    result = []
+    for g in groups:
+        count_q = select(func.count(ServiceItem.id)).where(
+            ServiceItem.group_id == g.id, ServiceItem.is_active == True
+        )
+        count = (await session.execute(count_q)).scalar() or 0
+        result.append({"id": g.id, "name": g.name, "count": count})
+    return result
+
+
+async def get_subgroups_with_counts(
+    session: AsyncSession, group_id: int, active_only: bool = True
+) -> list[dict]:
+    """Get subgroups with item counts."""
+    subgroups = await get_subgroups(session, group_id, active_only)
+    result = []
+    for s in subgroups:
+        count_q = select(func.count(ServiceItem.id)).where(
+            ServiceItem.subgroup_id == s.id, ServiceItem.is_active == True
+        )
+        count = (await session.execute(count_q)).scalar() or 0
+        result.append({"id": s.id, "name": s.name, "count": count})
+    return result
+
+
+async def get_professions_with_counts(
+    session: AsyncSession, active_only: bool = True
+) -> list[dict]:
+    """Get professions with total item counts."""
+    professions = await get_professions(session, active_only)
+    result = []
+    for p in professions:
+        count_q = select(func.count(ServiceItem.id)).where(
+            ServiceItem.profession_id == p.id, ServiceItem.is_active == True
+        )
+        count = (await session.execute(count_q)).scalar() or 0
+        result.append({
+            "id": p.id, "name": p.name, "icon": p.icon or "🔧", "count": count,
+        })
+    return result
+
+
 async def search_items_simple(
     session: AsyncSession,
     query: str,

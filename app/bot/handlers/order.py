@@ -1,4 +1,4 @@
-"""Order bot handlers: create, view, manage orders for clients and masters."""
+"""Order handlers: create, view, manage orders for clients and masters."""
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -8,7 +8,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bot import keyboards, messages
+from app.bot.ui import money, paginate
 from app.core.security import Role, has_role
+from app.models.estimate import Estimate, EstimateVersion
 from app.models.order import Order
 from app.services.auth import get_user_by_telegram_id
 from app.services.order import (
@@ -18,6 +21,8 @@ from app.services.order import (
 
 router = Router()
 
+PER_PAGE = 8
+
 
 class OrderStates(StatesGroup):
     entering_address = State()
@@ -25,7 +30,9 @@ class OrderStates(StatesGroup):
     cancel_reason = State()
 
 
-# === Client: My Orders ===
+# ═══════════════════════════════════════════════════════════════
+# ORDER LIST
+# ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data == "my_orders")
 async def cb_my_orders(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -33,31 +40,41 @@ async def cb_my_orders(callback: CallbackQuery, session: AsyncSession) -> None:
     if not user:
         return
 
-    orders = await get_orders_for_user(session, user, limit=10)
+    orders = await get_orders_for_user(session, user, limit=50)
+    all_orders = [
+        {"id": o.id, "status": o.status, "address": o.address}
+        for o in orders
+    ]
+    page_items, total_pages, current = paginate(all_orders, 1, PER_PAGE)
 
-    kb = InlineKeyboardBuilder()
-
-    if orders:
-        text = "📝 <b>Мои заказы</b>\n"
-        for o in orders:
-            emoji = _status_emoji(o.status)
-            label = f"{emoji} #{o.id} — {_status_ru(o.status)}"
-            if o.address:
-                label += f" · {o.address[:20]}"
-            kb.row(InlineKeyboardButton(text=label, callback_data=f"order_view:{o.id}"))
-    else:
-        text = (
-            "📝 <b>Мои заказы</b>\n\n"
-            "У вас пока нет заказов.\n"
-            "Создайте первый через кнопку ниже."
-        )
-
-    kb.row(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
-    kb.row(InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu"))
-
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        messages.order_list_header(len(all_orders)),
+        reply_markup=keyboards.order_list(page_items, current, total_pages),
+    )
     await callback.answer()
 
+
+@router.callback_query(F.data.startswith("orders_page:"))
+async def cb_orders_page(callback: CallbackQuery, session: AsyncSession) -> None:
+    page = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        return
+
+    orders = await get_orders_for_user(session, user, limit=50)
+    all_orders = [{"id": o.id, "status": o.status, "address": o.address} for o in orders]
+    page_items, total_pages, current = paginate(all_orders, page, PER_PAGE)
+
+    await callback.message.edit_text(
+        messages.order_list_header(len(all_orders)),
+        reply_markup=keyboards.order_list(page_items, current, total_pages),
+    )
+    await callback.answer()
+
+
+# ═══════════════════════════════════════════════════════════════
+# CREATE ORDER
+# ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data == "order_new")
 async def cb_new_order(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
@@ -65,29 +82,35 @@ async def cb_new_order(callback: CallbackQuery, state: FSMContext, session: Asyn
     if not user:
         return
 
-    # Check if there's a draft estimate to attach
-    from app.models.estimate import Estimate
+    # Check for draft estimate to attach
     result = await session.execute(
         select(Estimate)
-        .where(Estimate.master_id == user.id, Estimate.status == "draft")
+        .where(
+            ((Estimate.master_id == user.id) | (Estimate.client_id == user.id)),
+            Estimate.status.in_(["draft", "approved"]),
+        )
         .order_by(Estimate.created_at.desc())
         .limit(1)
     )
     draft_estimate = result.scalar_one_or_none()
-
     await state.update_data(estimate_id=draft_estimate.id if draft_estimate else None)
     await state.set_state(OrderStates.entering_address)
 
     est_text = f"\n📋 Смета #{draft_estimate.id} будет привязана." if draft_estimate else ""
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Отмена", callback_data="my_orders"))
+
     await callback.message.edit_text(
         f"📝 <b>Новый заказ</b>{est_text}\n\n"
-        "Введите адрес выполнения работ:"
+        "Введите адрес выполнения работ:",
+        reply_markup=kb.as_markup(),
     )
     await callback.answer()
 
 
 @router.message(OrderStates.entering_address)
-async def msg_order_address(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def msg_order_address(message: Message, state: FSMContext) -> None:
     address = message.text.strip()
     if len(address) < 5:
         await message.answer("⚠️ Адрес слишком короткий. Укажите полный адрес.")
@@ -95,16 +118,14 @@ async def msg_order_address(message: Message, state: FSMContext, session: AsyncS
 
     await state.update_data(address=address)
     await state.set_state(OrderStates.entering_notes)
-    await message.answer(
-        "📝 Опишите задачу кратко (или отправьте «-» чтобы пропустить):"
-    )
+    await message.answer("📝 Опишите задачу кратко (или отправьте «—» чтобы пропустить):")
 
 
 @router.message(OrderStates.entering_notes)
 async def msg_order_notes(message: Message, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     notes = message.text.strip()
-    if notes == "-":
+    if notes in ("-", "—"):
         notes = None
 
     user = await get_user_by_telegram_id(session, message.from_user.id)
@@ -125,17 +146,16 @@ async def msg_order_notes(message: Message, state: FSMContext, session: AsyncSes
         notes=notes,
     )
 
-    from app.bot import messages as msg
-    from app.bot.keyboards import order_actions
-
     await message.answer(
-        msg.order_created(order.id, order.address, notes),
-        reply_markup=order_actions(order.id, "draft"),
+        messages.order_created(order.id, order.address, notes),
+        reply_markup=keyboards.order_actions(order.id, "draft"),
     )
     await state.clear()
 
 
-# === Order View ===
+# ═══════════════════════════════════════════════════════════════
+# ORDER VIEW
+# ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("order_view:"))
 async def cb_view_order(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -149,28 +169,47 @@ async def cb_view_order(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     is_master = user and (has_role(user, Role.MASTER) or has_role(user, Role.SENIOR_MASTER))
 
-    text = (
-        f"<b>Заказ #{order.id}</b>\n"
-        f"{'─' * 24}\n"
-        f"Статус: {_status_emoji(order.status)} {_status_ru(order.status)}\n"
-        f"Адрес: {order.address or 'не указан'}\n"
-        f"Описание: {order.notes or '—'}\n"
-        f"Срочность: {_urgency_ru(order.urgency)}\n"
-    )
-    if order.master:
-        text += f"Мастер: {order.master.display_name}\n"
-    if order.cancellation_reason:
-        text += f"Причина отмены: {order.cancellation_reason}\n"
+    # Get estimate total if linked
+    estimate_total = None
+    if order.estimate_id:
+        est_result = await session.execute(select(Estimate).where(Estimate.id == order.estimate_id))
+        estimate = est_result.scalar_one_or_none()
+        if estimate and estimate.current_version_id:
+            ver = (await session.execute(
+                select(EstimateVersion).where(EstimateVersion.id == estimate.current_version_id)
+            )).scalar_one_or_none()
+            if ver:
+                estimate_total = ver.final_amount
 
-    from app.bot.keyboards import order_actions
+    # Get master name
+    master_name = None
+    if order.master_id:
+        from app.models.user import User
+        master = (await session.execute(select(User).where(User.id == order.master_id))).scalar_one_or_none()
+        if master:
+            master_name = master.display_name
+
+    order_data = {
+        "id": order.id,
+        "status": order.status,
+        "address": order.address,
+        "notes": order.notes,
+        "urgency": order.urgency,
+        "master_name": master_name,
+        "estimate_total": estimate_total,
+        "cancellation_reason": order.cancellation_reason,
+    }
+
     await callback.message.edit_text(
-        text,
-        reply_markup=order_actions(order.id, order.status, is_master=is_master),
+        messages.order_detail(order_data),
+        reply_markup=keyboards.order_actions(order.id, order.status, is_master=is_master),
     )
     await callback.answer()
 
 
-# === Order Actions ===
+# ═══════════════════════════════════════════════════════════════
+# ORDER ACTIONS
+# ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("order_submit:"))
 async def cb_submit_order(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -178,7 +217,8 @@ async def cb_submit_order(callback: CallbackQuery, session: AsyncSession) -> Non
     try:
         user = await get_user_by_telegram_id(session, callback.from_user.id)
         await submit_order(session, order_id=order_id, user_id=user.id)
-        await callback.answer("✅ Заказ отправлен в обработку!")
+        await callback.answer("📤 Заказ отправлен!", show_alert=True)
+        callback.data = f"order_view:{order_id}"
         await cb_view_order(callback, session)
     except Exception as e:
         await callback.answer(f"⚠️ {e}", show_alert=True)
@@ -192,8 +232,7 @@ async def cb_assign_order(callback: CallbackQuery, session: AsyncSession) -> Non
         return
     try:
         await assign_master(session, order_id=order_id, master_id=user.id, assigned_by=user.id)
-        await callback.answer("✅ Заказ назначен вам!")
-        # Re-render the view
+        await callback.answer("✅ Заказ назначен вам!", show_alert=True)
         callback.data = f"order_view:{order_id}"
         await cb_view_order(callback, session)
     except Exception as e:
@@ -206,7 +245,7 @@ async def cb_start_order(callback: CallbackQuery, session: AsyncSession) -> None
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     try:
         await transition_order(session, order_id=order_id, new_status="in_progress", user_id=user.id)
-        await callback.answer("🔨 Работа начата!")
+        await callback.answer("🔨 Работа начата!", show_alert=True)
         callback.data = f"order_view:{order_id}"
         await cb_view_order(callback, session)
     except Exception as e:
@@ -219,7 +258,7 @@ async def cb_complete_order(callback: CallbackQuery, session: AsyncSession) -> N
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     try:
         await complete_order(session, order_id=order_id, user_id=user.id)
-        await callback.answer("✅ Заказ завершён!")
+        await callback.answer("✅ Заказ завершён!", show_alert=True)
         callback.data = f"order_view:{order_id}"
         await cb_view_order(callback, session)
     except Exception as e:
@@ -227,11 +266,18 @@ async def cb_complete_order(callback: CallbackQuery, session: AsyncSession) -> N
 
 
 @router.callback_query(F.data.startswith("order_cancel:"))
-async def cb_cancel_order(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
     order_id = int(callback.data.split(":")[1])
     await state.update_data(cancel_order_id=order_id)
     await state.set_state(OrderStates.cancel_reason)
-    await callback.message.edit_text("❌ Введите причину отмены заказа:")
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Назад", callback_data=f"order_view:{order_id}"))
+
+    await callback.message.edit_text(
+        "❌ Введите причину отмены заказа:",
+        reply_markup=kb.as_markup(),
+    )
     await callback.answer()
 
 
@@ -252,7 +298,9 @@ async def msg_cancel_reason(message: Message, state: FSMContext, session: AsyncS
     await state.clear()
 
 
-# === Payment trigger from order ===
+# ═══════════════════════════════════════════════════════════════
+# PAYMENT
+# ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("order_pay:"))
 async def cb_order_payment(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -263,19 +311,17 @@ async def cb_order_payment(callback: CallbackQuery, session: AsyncSession) -> No
         await callback.answer("Заказ не найден", show_alert=True)
         return
 
-    # Get estimate total for payment amount
+    # Get estimate total
     amount = 0
     if order.estimate_id:
-        from app.models.estimate import Estimate, EstimateVersion
         est_result = await session.execute(select(Estimate).where(Estimate.id == order.estimate_id))
         estimate = est_result.scalar_one_or_none()
         if estimate and estimate.current_version_id:
-            ver_result = await session.execute(
+            ver = (await session.execute(
                 select(EstimateVersion).where(EstimateVersion.id == estimate.current_version_id)
-            )
-            version = ver_result.scalar_one_or_none()
-            if version:
-                amount = version.final_amount
+            )).scalar_one_or_none()
+            if ver:
+                amount = ver.final_amount
 
     if amount <= 0:
         await callback.answer("⚠️ Сумма заказа не определена", show_alert=True)
@@ -284,24 +330,16 @@ async def cb_order_payment(callback: CallbackQuery, session: AsyncSession) -> No
     from app.services.payment import create_payment, get_payment_info
     payment = await create_payment(session, order_id=order_id, amount=amount, method="phone")
     info = await get_payment_info(payment)
-
-    text = (
-        f"💳 <b>Оплата заказа #{order_id}</b>\n\n"
-        f"Сумма: <b>{info['amount']}₽</b>\n"
-    )
-    if info.get("phone"):
-        text += f"📱 Телефон: {info['phone']}\n"
-    if info.get("bank_name"):
-        text += f"🏦 Банк: {info['bank_name']}\n"
-    if info.get("recipient_name"):
-        text += f"👤 Получатель: {info['recipient_name']}\n"
-    text += f"\nСтатус: {info['status_label']}"
+    info["order_id"] = order_id
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"pay_confirm:{payment.id}"))
-    kb.row(InlineKeyboardButton(text="◀️ Назад", callback_data=f"order_view:{order_id}"))
+    kb.row(InlineKeyboardButton(text="← Заказ", callback_data=f"order_view:{order_id}"))
 
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        messages.payment_info(info),
+        reply_markup=kb.as_markup(),
+    )
     await callback.answer()
 
 
@@ -323,35 +361,35 @@ async def cb_confirm_payment(callback: CallbackQuery, session: AsyncSession) -> 
                     session, order_id=payment.order_id, new_status="paid", user_id=user.id,
                 )
             except Exception:
-                pass  # Order might already be in a different state
+                pass
 
         await callback.answer("✅ Оплата подтверждена!", show_alert=True)
         await callback.message.edit_text(
-            f"✅ <b>Оплата #{payment.id} подтверждена</b>\n\n"
-            f"Сумма: {payment.amount_paid}₽\n"
-            f"Спасибо за оплату!"
+            f"✅ <b>Оплата подтверждена</b>\n\n"
+            f"Сумма: {money(payment.amount_paid)}\n"
+            f"Спасибо!",
         )
     except Exception as e:
         await callback.answer(f"⚠️ {e}", show_alert=True)
 
 
-# === Helpers ===
+# ═══════════════════════════════════════════════════════════════
+# CREATE ORDER FROM ESTIMATE
+# ═══════════════════════════════════════════════════════════════
 
-def _status_emoji(status: str) -> str:
-    return {
-        "draft": "📝", "submitted": "📤", "assigned": "👷",
-        "in_progress": "🔨", "completed": "✅", "paid": "💰",
-        "cancelled": "❌", "disputed": "⚠️",
-    }.get(status, "📋")
+@router.callback_query(F.data.startswith("est_to_order:"))
+async def cb_estimate_to_order(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    """Create an order from an approved estimate."""
+    estimate_id = int(callback.data.split(":")[1])
+    await state.update_data(estimate_id=estimate_id)
+    await state.set_state(OrderStates.entering_address)
 
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Смета", callback_data=f"est_view:{estimate_id}"))
 
-def _status_ru(status: str) -> str:
-    return {
-        "draft": "Черновик", "submitted": "Отправлен", "assigned": "Назначен",
-        "in_progress": "В работе", "completed": "Завершён", "paid": "Оплачен",
-        "cancelled": "Отменён", "disputed": "Спор",
-    }.get(status, status)
-
-
-def _urgency_ru(urgency: str) -> str:
-    return {"normal": "Обычная", "urgent": "Срочно", "emergency": "Экстренно"}.get(urgency, urgency)
+    await callback.message.edit_text(
+        f"📝 <b>Заказ по смете #{estimate_id}</b>\n\n"
+        "Введите адрес выполнения работ:",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
