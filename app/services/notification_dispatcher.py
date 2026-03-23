@@ -9,19 +9,22 @@ when they are created, with a periodic sweep for retries.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from string import Template
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.events import Event, event_bus
 from app.database import get_async_session
-from app.models.notification import Notification
+from app.models.notification import Notification, NotificationTemplate
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 # Will be set by bot startup
 _bot_instance = None
+_handlers_subscribed = False
 
 
 def set_bot(bot) -> None:
@@ -61,7 +64,7 @@ async def deliver_notification(session: AsyncSession, notification: Notification
             reply_markup=reply_markup,
         )
         notification.status = "sent"
-        notification.sent_at = datetime.now(timezone.utc)
+        notification.sent_at = datetime.now(UTC)
         await session.flush()
         logger.info("Notification %d delivered to user %d (tg=%d)", notification.id, user.id, user.telegram_id)
         return True
@@ -162,15 +165,6 @@ async def notification_worker(interval: float = 10.0) -> None:
             logger.error("Notification worker error: %s", e)
         await asyncio.sleep(interval)
 
-
-# ── Event bus integration ──────────────────────────────────────
-
-from string import Template
-
-from app.core.events import Event, event_bus
-from app.models.notification import Notification, NotificationTemplate
-
-
 async def _create_notification_from_event(
     event: Event,
     *,
@@ -184,7 +178,7 @@ async def _create_notification_from_event(
         result = await session.execute(
             select(NotificationTemplate).where(
                 NotificationTemplate.event_type == event.type,
-                NotificationTemplate.is_active == True,  # noqa: E712
+                NotificationTemplate.is_active,
             )
         )
         template = result.scalar_one_or_none()
@@ -268,21 +262,11 @@ async def _on_payment_received(event: Event) -> None:
 
 
 async def _on_discount_requested(event: Event) -> None:
-    """Notify admins about discount request."""
-    from app.core.security import Role
-    session_factory = get_async_session()
-    async with session_factory() as session:
-        result = await session.execute(
-            select(User.id).join(User.roles).where(
-                User.is_active == True,  # noqa: E712
-            ).filter(
-                User.roles.any(role_code=Role.ADMIN.value)
-            )
-        )
-        admin_ids = list(result.scalars().all())
-    if admin_ids:
+    """Notify the assigned approver about a discount request."""
+    approver_id = event.payload.get("approver_id")
+    if approver_id:
         await _create_notification_from_event(
-            event, recipient_user_ids=admin_ids,
+            event, recipient_user_ids=[approver_id],
             entity_type="discount_request", entity_id=event.payload.get("discount_request_id"),
         )
 
@@ -299,6 +283,9 @@ async def _on_discount_resolved(event: Event) -> None:
 
 def subscribe_event_handlers() -> None:
     """Subscribe all notification handlers to the event bus. Call once at startup."""
+    global _handlers_subscribed
+    if _handlers_subscribed:
+        return
     event_bus.subscribe("estimate.for_review", _on_estimate_for_review)
     event_bus.subscribe("order.assigned", _on_order_assigned)
     event_bus.subscribe("order.completed", _on_order_completed)
@@ -306,4 +293,5 @@ def subscribe_event_handlers() -> None:
     event_bus.subscribe("discount.requested", _on_discount_requested)
     event_bus.subscribe("discount.approved", _on_discount_resolved)
     event_bus.subscribe("discount.rejected", _on_discount_resolved)
+    _handlers_subscribed = True
     logger.info("Notification event handlers subscribed")

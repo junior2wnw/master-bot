@@ -5,6 +5,7 @@ designed for easy extension to other channels.
 """
 
 import logging
+from datetime import UTC, datetime
 from string import Template
 
 from sqlalchemy import select
@@ -12,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.module_registry import is_enabled
 from app.models.notification import Notification, NotificationTemplate
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def notify(
     result = await session.execute(
         select(NotificationTemplate).where(
             NotificationTemplate.event_type == event_type,
-            NotificationTemplate.is_active == True,
+            NotificationTemplate.is_active,
         )
     )
     template = result.scalar_one_or_none()
@@ -81,8 +81,7 @@ async def mark_sent(session: AsyncSession, notification_id: int) -> None:
     n = result.scalar_one_or_none()
     if n:
         n.status = "sent"
-        from datetime import datetime, timezone
-        n.sent_at = datetime.now(timezone.utc)
+        n.sent_at = datetime.now(UTC)
         await session.flush()
 
 
@@ -100,7 +99,12 @@ async def mark_failed(session: AsyncSession, notification_id: int) -> None:
 # === Convenience functions for common notifications ===
 
 async def notify_discount_requested(
-    session: AsyncSession, approver_id: int, master_name: str, amount: str, estimate_id: int
+    session: AsyncSession,
+    approver_id: int,
+    master_name: str,
+    amount: str,
+    estimate_id: int,
+    discount_request_id: int | None = None,
 ) -> None:
     await notify(
         session,
@@ -108,7 +112,7 @@ async def notify_discount_requested(
         event_type="discount.requested",
         context={"master_name": master_name, "amount": amount, "estimate_id": str(estimate_id)},
         entity_type="discount_request",
-        entity_id=estimate_id,
+        entity_id=discount_request_id or estimate_id,
     )
 
 

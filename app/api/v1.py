@@ -22,11 +22,16 @@ from app.models.catalog import Profession, ServiceGroup, ServiceItem, ServiceSub
 from app.models.coefficient import Coefficient
 from app.models.discount import DiscountRequest
 from app.models.estimate import Estimate, EstimateLineItem, EstimateVersion
-from app.models.notification import Notification
 from app.models.order import Order
 from app.models.payment import CommissionRecord, Payment
 from app.models.user import User, UserRole
 from app.services.auth import get_or_create_user, get_user_by_telegram_id
+from app.services.workspace import (
+    get_dashboard_data,
+    list_notifications_for_user,
+    mark_notification_read as mark_workspace_notification_read,
+    serialize_notification,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
@@ -506,7 +511,6 @@ async def request_discount(
     session: AsyncSession = Depends(get_db),
 ):
     from app.services.discount import create_discount_request
-    from app.services.notification import notify_discount_requested
 
     dr = await create_discount_request(
         session,
@@ -516,16 +520,6 @@ async def request_discount(
         discount_value=body.value,
         reason=body.reason,
     )
-
-    if dr.assigned_to:
-        type_label = "%" if body.discount_type == "percent" else "₽"
-        await notify_discount_requested(
-            session,
-            approver_id=dr.assigned_to,
-            master_name=user.display_name,
-            amount=f"{body.value}{type_label}",
-            estimate_id=estimate_id,
-        )
 
     return {"id": dr.id, "status": dr.status}
 
@@ -722,26 +716,8 @@ async def list_notifications(
     session: AsyncSession = Depends(get_db),
     limit: int = Query(default=30, le=100),
 ):
-    result = await session.execute(
-        select(Notification)
-        .where(Notification.user_id == user.id)
-        .order_by(Notification.created_at.desc())
-        .limit(limit)
-    )
-    notifs = result.scalars().all()
-    return [
-        {
-            "id": n.id,
-            "event_type": n.event_type,
-            "title": n.title,
-            "body": n.body,
-            "status": n.status,
-            "entity_type": n.entity_type,
-            "entity_id": n.entity_id,
-            "created_at": n.created_at.isoformat() if n.created_at else None,
-        }
-        for n in notifs
-    ]
+    notifications = await list_notifications_for_user(session, user_id=user.id, limit=limit)
+    return [serialize_notification(item) for item in notifications]
 
 
 @router.post("/notifications/{notification_id}/read")
@@ -750,16 +726,13 @@ async def mark_notification_read(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    n = (await session.execute(
-        select(Notification).where(
-            Notification.id == notification_id,
-            Notification.user_id == user.id,
-        )
-    )).scalar_one_or_none()
-    if not n:
+    notification = await mark_workspace_notification_read(
+        session,
+        notification_id=notification_id,
+        user_id=user.id,
+    )
+    if not notification:
         raise HTTPException(404, "Notification not found")
-    n.status = "read"
-    await session.flush()
     return {"ok": True}
 
 
@@ -770,59 +743,7 @@ async def get_dashboard(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    data = {"roles": user.role_codes, "name": user.display_name}
-
-    is_master = has_role(user, Role.MASTER) or has_role(user, Role.SENIOR_MASTER) or has_role(user, Role.ADMIN)
-
-    if is_master:
-        # Active estimates
-        est_count = (await session.execute(
-            select(func.count(Estimate.id))
-            .where(Estimate.master_id == user.id, Estimate.status.in_(["draft", "master_proposed"]))
-        )).scalar() or 0
-        data["active_estimates"] = est_count
-
-        # Completed orders
-        completed = (await session.execute(
-            select(func.count(Order.id))
-            .where(Order.master_id == user.id, Order.status.in_(["completed", "paid"]))
-        )).scalar() or 0
-        data["completed_orders"] = completed
-
-        # Earnings
-        total_earned = (await session.execute(
-            select(func.coalesce(func.sum(Payment.amount_paid), 0))
-            .join(Order, Payment.order_id == Order.id)
-            .where(Order.master_id == user.id, Payment.status == "confirmed")
-        )).scalar() or 0
-        data["total_earned"] = total_earned
-
-    if has_role(user, Role.SENIOR_MASTER) or has_role(user, Role.ADMIN):
-        # Pending approvals
-        approvals = (await session.execute(
-            select(func.count(DiscountRequest.id))
-            .where(DiscountRequest.assigned_to == user.id, DiscountRequest.status == "pending")
-        )).scalar() or 0
-        data["pending_approvals"] = approvals
-
-    # Unread notifications
-    notif_count = (await session.execute(
-        select(func.count(Notification.id))
-        .where(Notification.user_id == user.id, Notification.status.in_(["pending", "sent"]))
-    )).scalar() or 0
-    data["unread_notifications"] = notif_count
-
-    # Active orders (for clients)
-    active_orders = (await session.execute(
-        select(func.count(Order.id))
-        .where(
-            (Order.client_id == user.id) | (Order.master_id == user.id),
-            Order.status.in_(["submitted", "assigned", "in_progress"]),
-        )
-    )).scalar() or 0
-    data["active_orders"] = active_orders
-
-    return data
+    return await get_dashboard_data(session, user)
 
 
 @router.get("/earnings")
@@ -902,9 +823,19 @@ async def process_approval(
     from app.services.discount import approve_discount, reject_discount
 
     if body.action == "approve":
-        await approve_discount(session, request_id=request_id, approved_by=user.id)
+        await approve_discount(
+            session,
+            discount_request_id=request_id,
+            approver=user,
+            comment=body.comment,
+        )
     elif body.action == "reject":
-        await reject_discount(session, request_id=request_id, rejected_by=user.id, reason=body.comment)
+        await reject_discount(
+            session,
+            discount_request_id=request_id,
+            approver=user,
+            comment=body.comment or "Отклонено",
+        )
     else:
         raise HTTPException(400, "Invalid action")
 

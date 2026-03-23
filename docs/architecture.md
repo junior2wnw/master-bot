@@ -41,6 +41,7 @@
 4. **Event-driven** — модули общаются через EventBus
 5. **Audit-first** — все бизнес-действия логируются
 6. **Channel-agnostic** — бизнес-логика не зависит от канала доставки
+7. **Workspace-first UX** — bot/web используют единый workspace-сервис для dashboard, inbox и action-needed очередей
 
 ## Поток данных
 

@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
-from app.bot.ui import THIN_LINE, money, paginate
+from app.bot.ui import money, paginate
 from app.core.security import Role, has_role
 from app.models.catalog import ServiceItem
 from app.models.estimate import Estimate, EstimateLineItem, EstimateVersion
@@ -18,9 +18,9 @@ from app.models.payment import Payment
 from app.services.auth import get_user_by_telegram_id
 from app.services.discount import create_discount_request
 from app.services.estimate import (
-    add_line_item, create_estimate, create_new_version, update_estimate_status,
+    add_line_item, create_estimate, update_estimate_status,
 )
-from app.services.notification import notify_discount_requested, notify_estimate_for_review
+from app.services.notification import notify_estimate_for_review
 
 router = Router()
 
@@ -554,19 +554,15 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
             discount_value=discount_value,
             reason=reason,
         )
-        if dr.assigned_to:
-            type_label = "%" if discount_type == "percent" else "₽"
-            await notify_discount_requested(
-                session,
-                approver_id=dr.assigned_to,
-                master_name=user.display_name,
-                amount=f"{discount_value}{type_label}",
-                estimate_id=estimate_id,
-            )
-
+        approver_note = (
+            "Уведомление отправлено в очередь согласования."
+            if dr.assigned_to
+            else "Запрос создан, но согласующий пока не назначен."
+        )
         await message.answer(
             f"✅ Запрос на скидку отправлен\n"
-            f"Тип: {discount_type}, Размер: {discount_value}, Причина: {reason}"
+            f"Тип: {discount_type}, Размер: {discount_value}, Причина: {reason}\n"
+            f"{approver_note}"
         )
     except Exception as e:
         await message.answer(f"⚠️ {e}")

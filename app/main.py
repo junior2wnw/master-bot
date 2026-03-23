@@ -2,12 +2,20 @@
 
 import asyncio
 import logging
+import pathlib
 
 import structlog
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
+from app.api.admin import router as admin_router
+from app.api.health import router as health_router
+from app.api.v1 import router as v1_router
 from app.config import get_settings
+from app.core.module_registry import load_flags, load_settings
+from app.database import get_async_session
+from app.services.notification_dispatcher import notification_worker, set_bot, subscribe_event_handlers
 
 
 def configure_logging(settings) -> None:
@@ -49,13 +57,6 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    import pathlib
-    from fastapi.staticfiles import StaticFiles
-
-    from app.api.health import router as health_router
-    from app.api.admin import router as admin_router
-    from app.api.v1 import router as v1_router
-
     app.include_router(health_router)
     app.include_router(admin_router)
     app.include_router(v1_router)
@@ -67,8 +68,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup() -> None:
-        from app.database import get_async_session
-        from app.core.module_registry import load_flags, load_settings
+        subscribe_event_handlers()
         async with get_async_session()() as session:
             try:
                 await load_flags(session)
@@ -88,7 +88,6 @@ async def start_bot() -> None:
         return
 
     from app.bot.app import create_bot
-    from app.services.notification_dispatcher import notification_worker, set_bot, subscribe_event_handlers
 
     bot, dp = create_bot()
     set_bot(bot)

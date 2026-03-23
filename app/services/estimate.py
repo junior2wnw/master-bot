@@ -1,6 +1,5 @@
 """Estimate service: create, version, modify, approve."""
 
-from decimal import Decimal
 from math import prod
 
 from sqlalchemy import select
@@ -8,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import NotFoundError
 from app.models.estimate import (
     Estimate,
     EstimateDiscount,
@@ -129,6 +128,7 @@ async def create_new_version(
     await session.flush()
 
     if copy_items and current:
+        copied_line_item_ids: dict[int, int] = {}
         # Copy line items from current version
         result = await session.execute(
             select(EstimateLineItem).where(EstimateLineItem.version_id == current.id)
@@ -148,6 +148,8 @@ async def create_new_version(
                 sort_order=old_item.sort_order,
             )
             session.add(new_item)
+            await session.flush()
+            copied_line_item_ids[old_item.id] = new_item.id
 
         # Copy discounts
         result = await session.execute(
@@ -161,6 +163,11 @@ async def create_new_version(
                 discount_value=old_disc.discount_value,
                 amount=old_disc.amount,
                 reason=old_disc.reason,
+                applied_to_line_item_id=(
+                    copied_line_item_ids.get(old_disc.applied_to_line_item_id)
+                    if old_disc.applied_to_line_item_id
+                    else None
+                ),
             )
             session.add(new_disc)
 

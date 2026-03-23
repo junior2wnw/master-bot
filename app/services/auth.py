@@ -5,8 +5,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
+from app.core.exceptions import ValidationError
 from app.core.security import Role
 from app.models.user import User, UserRole
+
+
+def _resolve_role_input(role: Role | str | None = None, role_code: str | None = None) -> Role:
+    raw = role if role is not None else role_code
+    if raw is None:
+        raise ValidationError("Не указана роль")
+    if isinstance(raw, Role):
+        return raw
+    try:
+        return Role(raw)
+    except ValueError as exc:
+        raise ValidationError(f"Неизвестная роль: {raw}") from exc
 
 
 async def get_or_create_user(
@@ -86,15 +99,17 @@ async def grant_role(
     session: AsyncSession,
     *,
     user: User,
-    role: Role,
+    role: Role | str | None = None,
+    role_code: str | None = None,
     granted_by: int | None = None,
 ) -> None:
     """Add a role to user if they don't already have it."""
+    resolved_role = _resolve_role_input(role=role, role_code=role_code)
     existing = [r.role_code for r in user.roles]
-    if role.value in existing:
+    if resolved_role.value in existing:
         return
 
-    user_role = UserRole(user_id=user.id, role_code=role.value, granted_by=granted_by)
+    user_role = UserRole(user_id=user.id, role_code=resolved_role.value, granted_by=granted_by)
     session.add(user_role)
     await session.flush()
     await session.refresh(user, ["roles"])
@@ -105,7 +120,7 @@ async def grant_role(
         action="role.granted",
         entity_type="user",
         entity_id=user.id,
-        new_value={"role": role.value},
+        new_value={"role": resolved_role.value},
     )
 
 
@@ -113,14 +128,16 @@ async def revoke_role(
     session: AsyncSession,
     *,
     user: User,
-    role: Role,
+    role: Role | str | None = None,
+    role_code: str | None = None,
     revoked_by: int | None = None,
 ) -> None:
     """Remove a role from user."""
+    resolved_role = _resolve_role_input(role=role, role_code=role_code)
     result = await session.execute(
         select(UserRole).where(
             UserRole.user_id == user.id,
-            UserRole.role_code == role.value,
+            UserRole.role_code == resolved_role.value,
         )
     )
     user_role = result.scalar_one_or_none()
@@ -135,7 +152,7 @@ async def revoke_role(
             action="role.revoked",
             entity_type="user",
             entity_id=user.id,
-            old_value={"role": role.value},
+            old_value={"role": resolved_role.value},
         )
 
 
