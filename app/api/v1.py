@@ -1079,6 +1079,254 @@ async def get_payment_qr(
         }
 
 
+# ─── Master Profile ──────────────────────────────────────────
+
+class ProfileUpdate(BaseModel):
+    full_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    telegram_username: str | None = None
+    company_name: str | None = None
+    inn: str | None = None
+    address: str | None = None
+    specialization: str | None = None
+    bank_name: str | None = None
+    bik: str | None = None
+    correspondent_account: str | None = None
+    settlement_account: str | None = None
+    card_number: str | None = None
+    sbp_phone: str | None = None
+    payment_recipient: str | None = None
+
+
+@router.get("/profile")
+async def get_profile(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.models.master_profile import MasterProfile
+    profile = (await session.execute(
+        select(MasterProfile).where(MasterProfile.user_id == user.id)
+    )).scalar_one_or_none()
+
+    if not profile:
+        return {
+            "user_id": user.id,
+            "full_name": user.display_name,
+            "phone": user.phone or "",
+            "telegram_username": user.username or "",
+            "email": "", "company_name": "", "inn": "", "address": "",
+            "specialization": "", "bank_name": "", "bik": "",
+            "correspondent_account": "", "settlement_account": "",
+            "card_number": "", "sbp_phone": "", "payment_recipient": "",
+        }
+
+    return {
+        "user_id": user.id,
+        "full_name": profile.full_name or user.display_name,
+        "phone": profile.phone or user.phone or "",
+        "email": profile.email or "",
+        "telegram_username": profile.telegram_username or user.username or "",
+        "company_name": profile.company_name or "",
+        "inn": profile.inn or "",
+        "address": profile.address or "",
+        "specialization": profile.specialization or "",
+        "bank_name": profile.bank_name or "",
+        "bik": profile.bik or "",
+        "correspondent_account": profile.correspondent_account or "",
+        "settlement_account": profile.settlement_account or "",
+        "card_number": profile.card_number or "",
+        "sbp_phone": profile.sbp_phone or "",
+        "payment_recipient": profile.payment_recipient or "",
+    }
+
+
+@router.put("/profile")
+async def update_profile(
+    body: ProfileUpdate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.models.master_profile import MasterProfile
+    profile = (await session.execute(
+        select(MasterProfile).where(MasterProfile.user_id == user.id)
+    )).scalar_one_or_none()
+
+    if not profile:
+        profile = MasterProfile(user_id=user.id)
+        session.add(profile)
+
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(profile, field, value)
+
+    await session.flush()
+    return {"ok": True}
+
+
+# ─── Estimate Export ─────────────────────────────────────────
+
+async def _get_export_data(session, estimate_id: int, user):
+    """Load estimate + profile data for export."""
+    from app.models.master_profile import MasterProfile
+    from app.services.estimate_export import ExportEstimate, ExportLineItem, ExportProfile
+
+    estimate = (await session.execute(
+        select(Estimate).where(Estimate.id == estimate_id)
+    )).scalar_one_or_none()
+    if not estimate:
+        raise HTTPException(404, "Estimate not found")
+
+    # Load version + items
+    ver = None
+    items = []
+    if estimate.current_version_id:
+        ver = (await session.execute(
+            select(EstimateVersion).where(EstimateVersion.id == estimate.current_version_id)
+        )).scalar_one_or_none()
+        if ver:
+            items = (await session.execute(
+                select(EstimateLineItem)
+                .where(EstimateLineItem.version_id == ver.id)
+                .order_by(EstimateLineItem.sort_order)
+            )).scalars().all()
+
+    # Discount reason
+    discount_reason = ""
+    if ver:
+        from app.models.estimate import EstimateDiscount
+        discounts = (await session.execute(
+            select(EstimateDiscount).where(EstimateDiscount.version_id == ver.id)
+        )).scalars().all()
+        if discounts:
+            discount_reason = discounts[0].reason or ""
+
+    # Client name
+    client_name = ""
+    if estimate.client_id:
+        client = (await session.execute(
+            select(User).where(User.id == estimate.client_id)
+        )).scalar_one_or_none()
+        if client:
+            client_name = client.display_name
+
+    # Build export estimate
+    export_items = []
+    for i, li in enumerate(items, 1):
+        coeffs = ""
+        if li.coefficients_applied:
+            coeffs = " ".join(f"×{v}" for v in li.coefficients_applied.values())
+        export_items.append(ExportLineItem(
+            number=i, name=li.name, unit=li.unit,
+            quantity=float(li.quantity), unit_price=li.unit_price,
+            coefficients=coeffs, subtotal=li.subtotal,
+        ))
+
+    export_est = ExportEstimate(
+        estimate_id=estimate.id,
+        version=ver.version_number if ver else 1,
+        status=estimate.status,
+        created_at=estimate.created_at.strftime("%d.%m.%Y") if estimate.created_at else "",
+        items=export_items,
+        total=ver.total_amount if ver else 0,
+        discount=ver.discount_amount if ver else 0,
+        final=ver.final_amount if ver else 0,
+        discount_reason=discount_reason,
+        note=estimate.note or "",
+        client_name=client_name,
+    )
+
+    # Load master profile
+    master_id = estimate.master_id or user.id
+    mp = (await session.execute(
+        select(MasterProfile).where(MasterProfile.user_id == master_id)
+    )).scalar_one_or_none()
+
+    master_user = (await session.execute(
+        select(User).where(User.id == master_id)
+    )).scalar_one_or_none()
+
+    export_profile = ExportProfile(
+        full_name=mp.full_name if mp and mp.full_name else (master_user.display_name if master_user else ""),
+        phone=mp.phone if mp and mp.phone else (master_user.phone if master_user else ""),
+        email=mp.email if mp else "",
+        telegram_username=mp.telegram_username if mp and mp.telegram_username else (master_user.username if master_user else ""),
+        company_name=mp.company_name if mp else "",
+        inn=mp.inn if mp else "",
+        address=mp.address if mp else "",
+        specialization=mp.specialization if mp else "",
+        bank_name=mp.bank_name if mp else "",
+        bik=mp.bik if mp else "",
+        correspondent_account=mp.correspondent_account if mp else "",
+        settlement_account=mp.settlement_account if mp else "",
+        card_number=mp.card_number if mp else "",
+        sbp_phone=mp.sbp_phone if mp else "",
+        payment_recipient=mp.payment_recipient if mp else "",
+    )
+
+    return export_est, export_profile
+
+
+@router.get("/estimates/{estimate_id}/export/pdf")
+async def export_estimate_pdf(
+    estimate_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from fastapi.responses import Response
+    from app.services.estimate_export import export_pdf
+
+    export_est, export_profile = await _get_export_data(session, estimate_id, user)
+    pdf_bytes = export_pdf(export_est, export_profile)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="smeta_{estimate_id}.pdf"',
+        },
+    )
+
+
+@router.get("/estimates/{estimate_id}/export/xlsx")
+async def export_estimate_xlsx(
+    estimate_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from fastapi.responses import Response
+    from app.services.estimate_export import export_xlsx
+
+    export_est, export_profile = await _get_export_data(session, estimate_id, user)
+    xlsx_bytes = export_xlsx(export_est, export_profile)
+
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="smeta_{estimate_id}.xlsx"',
+        },
+    )
+
+
+# ─── Payment QR (from master profile) ───────────────────────
+
+@router.get("/estimates/{estimate_id}/qr")
+async def get_estimate_qr(
+    estimate_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """Generate payment QR from master's bank details for an estimate."""
+    from app.services.estimate_export import generate_payment_qr
+
+    export_est, export_profile = await _get_export_data(session, estimate_id, user)
+
+    if not export_profile.bank_name and not export_profile.sbp_phone and not export_profile.card_number:
+        raise HTTPException(400, "Банковские реквизиты мастера не заполнены")
+
+    return generate_payment_qr(export_profile, export_est.final, estimate_id)
+
+
 # ─── Helpers ─────────────────────────────────────────────────
 
 async def _load_estimate(session: AsyncSession, estimate_id: int, user: User) -> dict:

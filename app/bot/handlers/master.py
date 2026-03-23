@@ -647,6 +647,205 @@ async def _refresh_estimate_view(callback: CallbackQuery, session: AsyncSession,
     )
 
 
+# ═══════════════════════════════════════════════════════════════
+# ESTIMATE EXPORT (PDF, XLSX) & QR CODE
+# ═══════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("est_pdf:"))
+async def cb_export_pdf(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Export estimate as PDF and send as document."""
+    estimate_id = int(callback.data.split(":")[1])
+    await callback.answer("Генерируем PDF...")
+
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        return
+
+    try:
+        export_est, export_profile = await _build_export_data(session, estimate_id, user)
+        from app.services.estimate_export import export_pdf
+        pdf_bytes = export_pdf(export_est, export_profile)
+
+        from aiogram.types import BufferedInputFile
+        doc = BufferedInputFile(pdf_bytes, filename=f"smeta_{estimate_id}.pdf")
+        await callback.message.answer_document(
+            doc, caption=f"📄 Смета #{estimate_id} (PDF)",
+        )
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка генерации PDF: {e}")
+
+
+@router.callback_query(F.data.startswith("est_xlsx:"))
+async def cb_export_xlsx(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Export estimate as XLSX and send as document."""
+    estimate_id = int(callback.data.split(":")[1])
+    await callback.answer("Генерируем XLSX...")
+
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        return
+
+    try:
+        export_est, export_profile = await _build_export_data(session, estimate_id, user)
+        from app.services.estimate_export import export_xlsx
+        xlsx_bytes = export_xlsx(export_est, export_profile)
+
+        from aiogram.types import BufferedInputFile
+        doc = BufferedInputFile(xlsx_bytes, filename=f"smeta_{estimate_id}.xlsx")
+        await callback.message.answer_document(
+            doc, caption=f"📊 Смета #{estimate_id} (XLSX)",
+        )
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка генерации XLSX: {e}")
+
+
+@router.callback_query(F.data.startswith("est_qr:"))
+async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show QR code for payment."""
+    estimate_id = int(callback.data.split(":")[1])
+    await callback.answer()
+
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        return
+
+    try:
+        export_est, export_profile = await _build_export_data(session, estimate_id, user)
+        from app.services.estimate_export import generate_payment_qr, _generate_qr_image, _build_qr_payload
+
+        if not export_profile.bank_name and not export_profile.sbp_phone and not export_profile.card_number:
+            await callback.message.answer(
+                "⚠️ Банковские реквизиты не заполнены.\n"
+                "Заполните их в профиле (Ещё → Личные данные и реквизиты)."
+            )
+            return
+
+        qr_payload = _build_qr_payload(export_profile, export_est.final, estimate_id)
+        qr_bytes = _generate_qr_image(qr_payload, size=300)
+
+        # Build payment text
+        from app.bot.ui import money as fmt_money
+        lines = [
+            f"💳 <b>Оплата по смете #{estimate_id}</b>",
+            f"💰 <b>Сумма: {fmt_money(export_est.final)}</b>",
+            "",
+        ]
+        if export_profile.payment_recipient:
+            lines.append(f"👤 Получатель: {export_profile.payment_recipient}")
+        if export_profile.bank_name:
+            lines.append(f"🏦 Банк: {export_profile.bank_name}")
+        if export_profile.settlement_account:
+            lines.append(f"📋 Р/с: <code>{export_profile.settlement_account}</code>")
+        if export_profile.bik:
+            lines.append(f"📋 БИК: <code>{export_profile.bik}</code>")
+        if export_profile.card_number:
+            lines.append(f"💳 Карта: <code>{export_profile.card_number}</code>")
+        if export_profile.sbp_phone:
+            lines.append(f"📱 СБП: <code>{export_profile.sbp_phone}</code>")
+
+        text = "\n".join(lines)
+
+        if qr_bytes:
+            from aiogram.types import BufferedInputFile
+            photo = BufferedInputFile(qr_bytes, filename="qr.png")
+            await callback.message.answer_photo(photo, caption=text)
+        else:
+            await callback.message.answer(text)
+
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+
+
+async def _build_export_data(session: AsyncSession, estimate_id: int, user):
+    """Build export data from DB."""
+    from app.models.master_profile import MasterProfile
+    from app.services.estimate_export import ExportEstimate, ExportLineItem, ExportProfile
+
+    estimate = (await session.execute(
+        select(Estimate).where(Estimate.id == estimate_id)
+    )).scalar_one_or_none()
+    if not estimate:
+        raise ValueError("Смета не найдена")
+
+    ver = None
+    items = []
+    if estimate.current_version_id:
+        ver = (await session.execute(
+            select(EstimateVersion).where(EstimateVersion.id == estimate.current_version_id)
+        )).scalar_one_or_none()
+        if ver:
+            items = (await session.execute(
+                select(EstimateLineItem)
+                .where(EstimateLineItem.version_id == ver.id)
+                .order_by(EstimateLineItem.sort_order)
+            )).scalars().all()
+
+    from app.models.user import User as UserModel
+    client_name = ""
+    if estimate.client_id:
+        client = (await session.execute(
+            select(UserModel).where(UserModel.id == estimate.client_id)
+        )).scalar_one_or_none()
+        if client:
+            client_name = client.display_name
+
+    export_items = []
+    for i, li in enumerate(items, 1):
+        coeffs = ""
+        if li.coefficients_applied:
+            coeffs = " ".join(f"×{v}" for v in li.coefficients_applied.values())
+        export_items.append(ExportLineItem(
+            number=i, name=li.name, unit=li.unit,
+            quantity=float(li.quantity), unit_price=li.unit_price,
+            coefficients=coeffs, subtotal=li.subtotal,
+        ))
+
+    export_est = ExportEstimate(
+        estimate_id=estimate.id,
+        version=ver.version_number if ver else 1,
+        status=estimate.status,
+        created_at=estimate.created_at.strftime("%d.%m.%Y") if estimate.created_at else "",
+        items=export_items,
+        total=ver.total_amount if ver else 0,
+        discount=ver.discount_amount if ver else 0,
+        final=ver.final_amount if ver else 0,
+        client_name=client_name,
+    )
+
+    master_id = estimate.master_id or user.id
+    mp = (await session.execute(
+        select(MasterProfile).where(MasterProfile.user_id == master_id)
+    )).scalar_one_or_none()
+
+    master_user = (await session.execute(
+        select(UserModel).where(UserModel.id == master_id)
+    )).scalar_one_or_none()
+
+    export_profile = ExportProfile(
+        full_name=mp.full_name if mp and mp.full_name else (master_user.display_name if master_user else ""),
+        phone=mp.phone if mp and mp.phone else (master_user.phone if master_user else ""),
+        email=mp.email if mp else "",
+        telegram_username=mp.telegram_username if mp and mp.telegram_username else (master_user.username if master_user else ""),
+        company_name=mp.company_name if mp else "",
+        inn=mp.inn if mp else "",
+        address=mp.address if mp else "",
+        specialization=mp.specialization if mp else "",
+        bank_name=mp.bank_name if mp else "",
+        bik=mp.bik if mp else "",
+        correspondent_account=mp.correspondent_account if mp else "",
+        settlement_account=mp.settlement_account if mp else "",
+        card_number=mp.card_number if mp else "",
+        sbp_phone=mp.sbp_phone if mp else "",
+        payment_recipient=mp.payment_recipient if mp else "",
+    )
+
+    return export_est, export_profile
+
+
+# ═══════════════════════════════════════════════════════════════
+# INTERNAL HELPERS
+# ═══════════════════════════════════════════════════════════════
+
 async def _adjust_quantity(session: AsyncSession, line_item_id: int, delta: int) -> None:
     """Adjust line item quantity by delta."""
     from math import prod

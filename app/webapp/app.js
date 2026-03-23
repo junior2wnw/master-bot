@@ -96,6 +96,8 @@ function navigate(screen, params = {}) {
     order: 'Заказ', earnings: 'Доходы', approvals: 'Согласования',
     analytics: 'Аналитика', profile: 'Профиль', item: 'Работа',
     notifications: 'Уведомления',
+    'profile-edit': 'Личные данные',
+    qr: 'Оплата',
   };
   document.getElementById('header-title').textContent = params.title || titles[screen] || '';
 
@@ -134,6 +136,8 @@ async function loadScreen(screen, params) {
     case 'profile': loadProfile(); break;
     case 'item': await loadItem(params.id); break;
     case 'notifications': await loadNotifications(); break;
+    case 'profile-edit': await loadProfileEdit(); break;
+    case 'qr': await loadQR(params.estimateId); break;
   }
 }
 
@@ -535,6 +539,20 @@ function renderEstimate(est) {
     `;
   }
 
+  // Export buttons (always visible if there are items)
+  if (est.items.length > 0) {
+    actionsHtml += `
+      <div class="export-bar mt-12">
+        <div class="export-title">Выгрузить смету</div>
+        <div class="export-buttons">
+          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/pdf?tg_id=${state.user.telegram_id}" target="_blank">📄 PDF</a>
+          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/xlsx?tg_id=${state.user.telegram_id}" target="_blank">📊 XLSX</a>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('qr', {estimateId: ${est.id}})">💳 QR оплата</button>
+        </div>
+      </div>
+    `;
+  }
+
   container.innerHTML = `
     <div class="cart-header">
       <h3>Смета #${est.id} <span style="font-weight:400;color:var(--text-muted)">v${est.version}</span></h3>
@@ -917,6 +935,7 @@ function loadProfile() {
   const isAdmin = u.roles.some(r => ['admin','product_owner'].includes(r));
 
   let menuItems = '';
+  menuItems += profileItem('👤', 'Личные данные и реквизиты', "navigate('profile-edit')");
   if (isMaster) {
     menuItems += profileItem('💰', 'Доходы', "navigate('earnings')");
     menuItems += profileItem('📊', 'Мои сметы', "navigate('estimates')");
@@ -947,6 +966,147 @@ function profileItem(icon, label, action) {
       <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
     </div>
   `;
+}
+
+// ─── Profile Editor ─────────────────────────────────────────
+async function loadProfileEdit() {
+  let p;
+  try {
+    p = await api('GET', '/profile');
+  } catch (e) {
+    p = {full_name:'', phone:'', email:'', telegram_username:'', company_name:'', inn:'', address:'', specialization:'', bank_name:'', bik:'', correspondent_account:'', settlement_account:'', card_number:'', sbp_phone:'', payment_recipient:''};
+  }
+
+  const container = document.getElementById('profile-edit-content');
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-title">👤 Личные данные</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Эти данные используются в шапке смет (PDF/XLSX)</p>
+      ${formField('pe-full_name', 'ФИО', p.full_name, 'Иванов Иван Иванович')}
+      ${formField('pe-phone', 'Телефон', p.phone, '+7 999 123-45-67')}
+      ${formField('pe-email', 'Email', p.email, 'master@mail.ru')}
+      ${formField('pe-telegram_username', 'Telegram', p.telegram_username, '@username')}
+      ${formField('pe-company_name', 'Компания / ИП', p.company_name, 'ИП Иванов И.И.')}
+      ${formField('pe-inn', 'ИНН', p.inn, '123456789012')}
+      ${formField('pe-address', 'Адрес', p.address, 'г. Стерлитамак, ул. ...')}
+      ${formField('pe-specialization', 'Специализация', p.specialization, 'Электрик, Сантехник')}
+    </div>
+
+    <div class="card mt-12">
+      <div class="card-title">🏦 Банковские реквизиты</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Для QR-кода оплаты и реквизитов в смете</p>
+      ${formField('pe-payment_recipient', 'Получатель платежа', p.payment_recipient, 'ИП Иванов Иван Иванович')}
+      ${formField('pe-bank_name', 'Банк', p.bank_name, 'Сбербанк')}
+      ${formField('pe-settlement_account', 'Расчётный счёт', p.settlement_account, '40802810...')}
+      ${formField('pe-correspondent_account', 'Корр. счёт', p.correspondent_account, '30101810...')}
+      ${formField('pe-bik', 'БИК', p.bik, '042202603')}
+      ${formField('pe-card_number', 'Номер карты', p.card_number, '2202 **** **** 1234')}
+      ${formField('pe-sbp_phone', 'Телефон СБП', p.sbp_phone, '+7 999 123-45-67')}
+    </div>
+
+    <button class="btn btn-primary btn-block mt-12" onclick="saveProfile()">💾 Сохранить</button>
+  `;
+}
+
+function formField(id, label, value, placeholder) {
+  return `
+    <div class="form-group">
+      <label class="form-label" for="${id}">${label}</label>
+      <input class="form-input" id="${id}" type="text" value="${esc(value || '')}" placeholder="${placeholder}">
+    </div>
+  `;
+}
+
+async function saveProfile() {
+  const fields = ['full_name','phone','email','telegram_username','company_name','inn','address','specialization','payment_recipient','bank_name','settlement_account','correspondent_account','bik','card_number','sbp_phone'];
+  const data = {};
+  for (const f of fields) {
+    data[f] = document.getElementById('pe-' + f).value.trim();
+  }
+  try {
+    await api('PUT', '/profile', data);
+    toast('Данные сохранены');
+  } catch (e) { toast(e.message, true); }
+}
+
+// ─── QR Payment Viewer ─────────────────────────────────────
+async function loadQR(estimateId) {
+  const container = document.getElementById('qr-content');
+
+  if (!estimateId) {
+    container.innerHTML = '<div class="empty-state"><p>Не выбрана смета</p></div>';
+    return;
+  }
+
+  try {
+    const data = await api('GET', `/estimates/${estimateId}/qr`);
+
+    container.innerHTML = `
+      <div class="qr-viewer">
+        <div class="qr-amount">${money(data.amount)}</div>
+        <div class="qr-label">Оплата по смете #${estimateId}</div>
+
+        ${data.qr_image ? `
+          <div class="qr-image-wrap">
+            <img src="data:image/png;base64,${data.qr_image}" alt="QR код для оплаты" class="qr-image">
+          </div>
+          <div class="qr-hint">Отсканируйте QR-код в приложении банка</div>
+        ` : ''}
+
+        <div class="card mt-12">
+          <div class="card-title">Реквизиты для оплаты</div>
+          ${data.recipient ? payRow('Получатель', data.recipient) : ''}
+          ${data.bank ? payRow('Банк', data.bank) : ''}
+          ${data.account ? payRow('Р/с', data.account, true) : ''}
+          ${data.bik ? payRow('БИК', data.bik, true) : ''}
+          ${data.inn ? payRow('ИНН', data.inn, true) : ''}
+          ${data.card ? payRow('Карта', data.card, true) : ''}
+          ${data.sbp_phone ? payRow('СБП (телефон)', data.sbp_phone, true) : ''}
+        </div>
+
+        ${data.sbp_phone ? `
+          <div class="sbp-section mt-12">
+            <div class="sbp-label">Перевод по СБП</div>
+            <div class="sbp-phone" onclick="copyToClipboard('${data.sbp_phone}')">${data.sbp_phone} <span class="copy-icon">📋</span></div>
+            <div class="sbp-hint">Нажмите, чтобы скопировать номер</div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  } catch (e) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <p>${e.message || 'Ошибка загрузки QR-кода'}</p>
+        <p class="text-muted">Убедитесь, что банковские реквизиты заполнены в профиле мастера</p>
+        <button class="btn btn-primary mt-12" onclick="navigate('profile-edit')">Заполнить реквизиты</button>
+      </div>
+    `;
+  }
+}
+
+function payRow(label, value, copyable) {
+  if (!value) return '';
+  const onclick = copyable ? `onclick="copyToClipboard('${esc(value)}')"` : '';
+  return `
+    <div class="pay-row" ${onclick}>
+      <span class="pay-label">${label}</span>
+      <span class="pay-value">${value}${copyable ? ' <span class="copy-icon">📋</span>' : ''}</span>
+    </div>
+  `;
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => toast('Скопировано'))
+    .catch(() => {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      toast('Скопировано');
+    });
 }
 
 // ─── Notifications ──────────────────────────────────────────

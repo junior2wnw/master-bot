@@ -225,6 +225,13 @@ def estimate_actions(estimate_id: int, is_master: bool = False, status: str = "d
     if status == "approved" and is_master:
         kb.row(InlineKeyboardButton(text="📝 Создать заказ", callback_data=f"est_to_order:{estimate_id}"))
 
+    # Export and QR buttons (always available)
+    kb.row(
+        InlineKeyboardButton(text="📄 PDF", callback_data=f"est_pdf:{estimate_id}"),
+        InlineKeyboardButton(text="📊 XLSX", callback_data=f"est_xlsx:{estimate_id}"),
+        InlineKeyboardButton(text="💳 QR", callback_data=f"est_qr:{estimate_id}"),
+    )
+
     add_back_row(kb, "Сметы", "my_estimates")
     return kb.as_markup()
 
