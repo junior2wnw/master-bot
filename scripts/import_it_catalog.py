@@ -153,6 +153,10 @@ GROUPS = {
                 "name": "IP-TV и приставки",
                 "rows": [109],
             },
+            "diagnostika_apparatnaya": {
+                "name": "Аппаратная диагностика",
+                "rows": [110],
+            },
         },
     },
     "apple": {
