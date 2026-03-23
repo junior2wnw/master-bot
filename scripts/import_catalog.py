@@ -267,8 +267,8 @@ async def run_import(excel_path: str, dry_run: bool = False, drop_existing: bool
         shared_count = 0
 
         for row in shared_ops_rows:
-            code = safe_str(row.get("code") or row.get("op_code"))
-            name = safe_str(row.get("name") or row.get("op_name"))
+            code = safe_str(row.get("shared_op_code") or row.get("code") or row.get("op_code"))
+            name = safe_str(row.get("shared_op_name") or row.get("name") or row.get("op_name"))
             if not code:
                 continue
 
@@ -402,11 +402,11 @@ async def run_import(excel_path: str, dry_run: bool = False, drop_existing: bool
                 coef = Coefficient(
                     coef_type=safe_str(row.get("coef_type") or row.get("type"), "other"),
                     coef_key=key,
-                    label=safe_str(row.get("label") or row.get("name"), key),
+                    label=safe_str(row.get("label_ru") or row.get("label") or row.get("name"), key),
                     multiplier=safe_float(row.get("multiplier") or row.get("value"), 1.0),
                     applies_to=safe_str(row.get("applies_to")) or None,
                     when_use=safe_str(row.get("when_use") or row.get("description")) or None,
-                    note=safe_str(row.get("note")) or None,
+                    note=safe_str(row.get("notes") or row.get("note")) or None,
                     sort_priority=safe_int(row.get("sort_priority") or row.get("sort"), 0),
                 )
                 session.add(coef)
