@@ -1,14 +1,16 @@
-"""Start handler: registration, main menu with dashboard, profile."""
+"""Start handler: registration, main menu with dashboard, profile, Mini App launch."""
 
 import re
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, Message
+from aiogram.filters import Command, CommandStart
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message, WebAppInfo
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
+from app.config import get_settings
 from app.core.security import Role, has_role
 from app.models.discount import DiscountRequest
 from app.models.estimate import Estimate
@@ -131,6 +133,58 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
                 await message.answer(f"⚠️ {e}")
 
     await _show_main_menu(message, session, user)
+
+
+@router.message(Command("app"))
+async def cmd_open_app(message: Message, session: AsyncSession) -> None:
+    """Open Mini App via inline button with WebAppInfo."""
+    settings = get_settings()
+    webapp_url = settings.webapp_url
+
+    if not webapp_url:
+        await message.answer(
+            "📱 <b>Приложение</b>\n\n"
+            "Mini App будет доступно после настройки HTTPS.\n"
+            "Пока используйте кнопки ниже.",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(
+        text="📱 Открыть приложение",
+        web_app=WebAppInfo(url=webapp_url),
+    ))
+    kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))
+
+    await message.answer(
+        "📱 <b>МастерБот</b>\n\n"
+        "Нажмите кнопку ниже, чтобы открыть\n"
+        "современный интерфейс приложения.",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    settings = get_settings()
+    webapp_url = settings.webapp_url
+
+    text = (
+        "🤖 <b>МастерБот — Помощь</b>\n\n"
+        "📋 /start — Главное меню\n"
+        "📱 /app — Открыть приложение\n"
+        "🔍 /search — Поиск работ\n"
+        "📊 /estimate — Мои сметы\n"
+        "❓ /help — Эта справка\n\n"
+        "💡 <b>Быстрый поиск:</b> просто напишите\n"
+        "название работы в чат.\n\n"
+        "💡 <b>Inline-поиск:</b> наберите\n"
+        "<code>@имя_бота запрос</code> в любом чате."
+    )
+    if webapp_url:
+        text += f"\n\n📱 <a href='{webapp_url}'>Открыть приложение</a>"
+
+    await message.answer(text, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "main_menu")

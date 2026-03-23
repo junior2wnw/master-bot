@@ -24,6 +24,16 @@ def main_menu(roles: list[str], pending: dict | None = None) -> InlineKeyboardMa
     p = pending or {}
     kb = InlineKeyboardBuilder()
 
+    # Mini App button (if webapp_url is configured)
+    from app.config import get_settings
+    settings = get_settings()
+    if settings.webapp_url:
+        from aiogram.types import WebAppInfo
+        kb.row(InlineKeyboardButton(
+            text="📱 Открыть приложение",
+            web_app=WebAppInfo(url=settings.webapp_url),
+        ))
+
     # Top row: key actions for everyone
     kb.row(
         InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),

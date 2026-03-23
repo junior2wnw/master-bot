@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Telegram
     bot_token: str = ""
+    webapp_url: str = ""  # Public HTTPS URL for Mini App, e.g. https://bot.example.com/app
 
     # Database
     database_url: str = "postgresql+asyncpg://masterbot:masterbot@db:5432/masterbot"

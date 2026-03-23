@@ -302,8 +302,73 @@ async def msg_voice(message: Message, session: AsyncSession) -> None:
         await message.answer(messages.voice_disabled())
         return
 
-    await message.answer(messages.voice_processing())
-    # AI processing would go here when AI module is enabled
+    processing_msg = await message.answer(messages.voice_processing())
+
+    try:
+        from app.services.ai_intake import process_voice
+
+        # Download voice file
+        file = await message.bot.get_file(message.voice.file_id)
+        audio_bytes = await message.bot.download_file(file.file_path)
+        audio_data = audio_bytes.read() if hasattr(audio_bytes, 'read') else audio_bytes
+
+        # Process with AI
+        result = await process_voice(session, audio_data, message.voice.mime_type or "audio/ogg")
+
+        if result.confidence == 0 or not result.detected_items:
+            text = "🎤 <b>Распознанный текст:</b>\n"
+            text += f"<i>{result.raw_text or 'не распознано'}</i>\n\n"
+            if result.summary:
+                text += f"{result.summary}\n\n"
+            text += "💡 Попробуйте описать задачу подробнее или используйте каталог."
+
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from aiogram.types import InlineKeyboardButton
+            kb = InlineKeyboardBuilder()
+            kb.row(
+                InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
+                InlineKeyboardButton(text="🔍 Поиск", callback_data="search"),
+            )
+            await processing_msg.edit_text(text, reply_markup=kb.as_markup())
+            return
+
+        # Build response with detected items
+        text = f"🎤 <b>Распознано:</b> <i>{result.raw_text}</i>\n\n"
+        if result.summary:
+            text += f"📋 {result.summary}\n\n"
+
+        text += "<b>Предложенные работы:</b>\n"
+        for i, item in enumerate(result.detected_items, 1):
+            text += f"  {i}. {item.get('name', '?')} × {item.get('qty', 1)}\n"
+
+        if result.unresolved_questions:
+            text += "\n❓ <b>Уточните:</b>\n"
+            for q in result.unresolved_questions:
+                text += f"  • {q}\n"
+
+        if result.risk_flags:
+            text += "\n⚠️ <b>Обратите внимание:</b>\n"
+            for r in result.risk_flags:
+                text += f"  • {r}\n"
+
+        text += f"\n🎯 Уверенность: {int(result.confidence * 100)}%"
+
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from aiogram.types import InlineKeyboardButton
+        kb = InlineKeyboardBuilder()
+        kb.row(
+            InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
+            InlineKeyboardButton(text="← Меню", callback_data="main_menu"),
+        )
+        await processing_msg.edit_text(text, reply_markup=kb.as_markup())
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Voice processing error: %s", e)
+        await processing_msg.edit_text(
+            "⚠️ Ошибка обработки голосового сообщения.\n"
+            "Попробуйте описать задачу текстом."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════

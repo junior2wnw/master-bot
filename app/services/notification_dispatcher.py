@@ -48,13 +48,17 @@ async def deliver_notification(session: AsyncSession, notification: Notification
         return False
 
     # Build message
-    text = f"<b>{notification.title}</b>\n\n{notification.body}"
+    text = f"🔔 <b>{notification.title}</b>\n\n{notification.body}"
+
+    # Build action keyboard based on event type
+    reply_markup = _build_action_keyboard(notification)
 
     try:
         await _bot_instance.send_message(
             chat_id=user.telegram_id,
             text=text,
             parse_mode="HTML",
+            reply_markup=reply_markup,
         )
         notification.status = "sent"
         notification.sent_at = datetime.now(timezone.utc)
@@ -67,6 +71,52 @@ async def deliver_notification(session: AsyncSession, notification: Notification
         await session.flush()
         logger.error("Failed to deliver notification %d: %s", notification.id, e)
         return False
+
+
+def _build_action_keyboard(notification: Notification):
+    """Build inline keyboard with relevant action buttons for the notification."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    buttons = []
+    eid = notification.entity_id
+
+    if notification.event_type == "discount.requested" and eid:
+        buttons = [
+            [
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"disc_approve:{eid}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"disc_reject:{eid}"),
+            ]
+        ]
+    elif notification.event_type == "estimate.for_review" and eid:
+        buttons = [
+            [
+                InlineKeyboardButton(text="✅ Согласовать", callback_data=f"est_approve:{eid}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"est_reject:{eid}"),
+            ],
+            [InlineKeyboardButton(text="📊 Посмотреть смету", callback_data=f"est_view:{eid}")],
+        ]
+    elif notification.event_type == "order.assigned" and eid:
+        buttons = [
+            [InlineKeyboardButton(text="🔨 Начать работу", callback_data=f"order_start:{eid}")],
+            [InlineKeyboardButton(text="📋 Посмотреть заказ", callback_data=f"order_view:{eid}")],
+        ]
+    elif notification.event_type == "order.completed" and eid:
+        buttons = [
+            [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"order_pay:{eid}")],
+        ]
+    elif notification.event_type == "invite.pending_approval":
+        buttons = [
+            [InlineKeyboardButton(text="👥 Модерация", callback_data="inv_pending")],
+        ]
+    elif notification.event_type in ("discount.approved", "discount.rejected") and eid:
+        buttons = [
+            [InlineKeyboardButton(text="📊 Смета", callback_data=f"est_view:{eid}")],
+        ]
+
+    # Always add menu button
+    buttons.append([InlineKeyboardButton(text="← Меню", callback_data="main_menu")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
 
 
 async def dispatch_pending(batch_size: int = 20) -> int:

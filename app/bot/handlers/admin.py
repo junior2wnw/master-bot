@@ -786,23 +786,67 @@ async def cb_admin_audit(callback: CallbackQuery, session: AsyncSession) -> None
 # STUBS for remaining admin features
 # ═══════════════════════════════════════════════════════════════
 
-@router.callback_query(F.data.in_({"adm_prices", "adm_coefficients", "adm_staffing", "adm_notifications"}))
+@router.callback_query(F.data == "adm_coefficients")
+async def cb_admin_coefficients(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+    from app.models.coefficient import Coefficient
+    result = await session.execute(select(Coefficient).order_by(Coefficient.coefficient_type))
+    coeffs = result.scalars().all()
+
+    if not coeffs:
+        text = "📊 <b>Коэффициенты</b>\n\nНет настроенных коэффициентов."
+    else:
+        lines = ["📊 <b>Коэффициенты</b>\n"]
+        for c in coeffs:
+            lines.append(f"• <b>{c.coefficient_type}</b>: {c.name} — ×{c.value}")
+        text = "\n".join(lines)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Админ", callback_data="admin_panel"))
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm_staffing")
+async def cb_admin_staffing(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+    from app.models.staffing import StaffingAction
+    result = await session.execute(
+        select(StaffingAction).order_by(StaffingAction.created_at.desc()).limit(10)
+    )
+    actions = result.scalars().all()
+
+    lines = ["👷 <b>Кадровые действия</b>\n"]
+    if not actions:
+        lines.append("Нет записей.")
+    else:
+        for a in actions:
+            lines.append(f"• {a.action_type} — пользователь #{a.target_user_id} ({a.status})")
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Админ", callback_data="admin_panel"))
+    await callback.message.edit_text("\n".join(lines), reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"adm_prices", "adm_notifications"}))
 async def cb_admin_stub(callback: CallbackQuery, session: AsyncSession) -> None:
     if not await _check_admin(callback, session):
         return
 
     labels = {
         "adm_prices": "💰 Управление ценами",
-        "adm_coefficients": "📊 Коэффициенты",
-        "adm_staffing": "👷 Кадры",
         "adm_notifications": "🔔 Уведомления",
     }
     label = labels.get(callback.data, "Раздел")
 
     kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="📱 Открыть в приложении", callback_data="open_webapp"))
     kb.row(InlineKeyboardButton(text="← Админ", callback_data="admin_panel"))
     await callback.message.edit_text(
-        f"{label}\n\n<i>Раздел в разработке.</i>",
+        f"{label}\n\n<i>Полное управление доступно в Mini App.</i>",
         reply_markup=kb.as_markup(),
     )
     await callback.answer()

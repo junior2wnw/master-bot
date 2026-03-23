@@ -49,11 +49,21 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
+    import pathlib
+    from fastapi.staticfiles import StaticFiles
+
     from app.api.health import router as health_router
     from app.api.admin import router as admin_router
+    from app.api.v1 import router as v1_router
 
     app.include_router(health_router)
     app.include_router(admin_router)
+    app.include_router(v1_router)
+
+    # Serve Mini App static files
+    webapp_dir = pathlib.Path(__file__).parent / "webapp"
+    if webapp_dir.exists():
+        app.mount("/app", StaticFiles(directory=str(webapp_dir), html=True), name="webapp")
 
     @app.on_event("startup")
     async def startup() -> None:
