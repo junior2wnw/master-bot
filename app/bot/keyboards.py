@@ -36,7 +36,7 @@ def main_menu(roles: list[str], pending: dict | None = None) -> InlineKeyboardMa
             orders_label += f" ({p['orders']})"
         kb.row(InlineKeyboardButton(text=orders_label, callback_data="my_orders"))
 
-    if any(r in roles for r in ("master", "senior_master", "admin")):
+    if any(r in roles for r in ("master", "senior_master", "admin", "product_owner")):
         est_label = "📊 Сметы"
         if p.get("estimates"):
             est_label += f" ({p['estimates']})"

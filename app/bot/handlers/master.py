@@ -27,6 +27,16 @@ router = Router()
 PER_PAGE = 8
 
 
+def _can_access_estimates(user) -> bool:
+    """Owner, admin, senior_master and master can all access estimates."""
+    if not user:
+        return False
+    return any(
+        has_role(user, r)
+        for r in (Role.PRODUCT_OWNER, Role.ADMIN, Role.SENIOR_MASTER, Role.MASTER)
+    )
+
+
 class EstimateStates(StatesGroup):
     searching = State()
     setting_quantity = State()
@@ -42,7 +52,7 @@ class EstimateStates(StatesGroup):
 async def cb_my_earnings(callback: CallbackQuery, session: AsyncSession) -> None:
     """Show master's earnings dashboard."""
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user or not has_role(user, Role.MASTER):
+    if not _can_access_estimates(user):
         await callback.answer("Доступно только мастерам", show_alert=True)
         return
 
@@ -89,7 +99,7 @@ async def cb_my_earnings(callback: CallbackQuery, session: AsyncSession) -> None
 @router.callback_query(F.data == "my_estimates")
 async def cb_my_estimates(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user or not has_role(user, Role.MASTER):
+    if not _can_access_estimates(user):
         await callback.answer("Доступно только мастерам", show_alert=True)
         return
 
@@ -174,7 +184,7 @@ async def cb_view_estimate(callback: CallbackQuery, session: AsyncSession) -> No
         return
 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    is_master = user and has_role(user, Role.MASTER)
+    is_master = _can_access_estimates(user)
 
     await callback.message.edit_text(
         messages.estimate_summary(est_data),
@@ -629,7 +639,7 @@ async def _refresh_estimate_view(callback: CallbackQuery, session: AsyncSession,
         return
 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    is_master = user and has_role(user, Role.MASTER)
+    is_master = _can_access_estimates(user)
 
     await callback.message.edit_text(
         messages.estimate_summary(est_data),
