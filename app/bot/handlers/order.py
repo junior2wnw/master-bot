@@ -1,5 +1,7 @@
 """Order handlers: create, view, manage orders for clients and masters."""
 
+import logging
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -18,6 +20,8 @@ from app.services.order import (
     assign_master, cancel_order, complete_order, create_order,
     get_orders_for_user, submit_order, transition_order,
 )
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -360,8 +364,8 @@ async def cb_confirm_payment(callback: CallbackQuery, session: AsyncSession) -> 
                 await transition_order(
                     session, order_id=payment.order_id, new_status="paid", user_id=user.id,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Could not transition order %d to paid: %s", payment.order_id, exc)
 
         await callback.answer("✅ Оплата подтверждена!", show_alert=True)
         await callback.message.edit_text(

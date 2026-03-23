@@ -88,10 +88,11 @@ async def start_bot() -> None:
         return
 
     from app.bot.app import create_bot
-    from app.services.notification_dispatcher import notification_worker, set_bot
+    from app.services.notification_dispatcher import notification_worker, set_bot, subscribe_event_handlers
 
     bot, dp = create_bot()
     set_bot(bot)
+    subscribe_event_handlers()
 
     try:
         # Run bot polling and notification worker concurrently

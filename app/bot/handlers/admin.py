@@ -791,7 +791,7 @@ async def cb_admin_coefficients(callback: CallbackQuery, session: AsyncSession) 
     if not await _check_admin(callback, session):
         return
     from app.models.coefficient import Coefficient
-    result = await session.execute(select(Coefficient).order_by(Coefficient.coefficient_type))
+    result = await session.execute(select(Coefficient).order_by(Coefficient.coef_type))
     coeffs = result.scalars().all()
 
     if not coeffs:
@@ -799,7 +799,7 @@ async def cb_admin_coefficients(callback: CallbackQuery, session: AsyncSession) 
     else:
         lines = ["📊 <b>Коэффициенты</b>\n"]
         for c in coeffs:
-            lines.append(f"• <b>{c.coefficient_type}</b>: {c.name} — ×{c.value}")
+            lines.append(f"• <b>{c.coef_type}</b>: {c.label} — ×{c.multiplier}")
         text = "\n".join(lines)
 
     kb = InlineKeyboardBuilder()

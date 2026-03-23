@@ -121,3 +121,41 @@ async def _execute_action(session: AsyncSession, action: StaffingAction, target:
     elif action.action_type == "restore":
         target.is_active = True
         await session.flush()
+    elif action.action_type == "transfer":
+        # Move user to a different branch
+        meta = action.metadata_ or {}
+        new_branch_id = meta.get("new_branch_id")
+        if new_branch_id:
+            from app.models.hierarchy import BranchMember
+            # Deactivate current branch membership(s)
+            result = await session.execute(
+                select(BranchMember).where(
+                    BranchMember.user_id == target.id,
+                    BranchMember.is_active == True,  # noqa: E712
+                )
+            )
+            for membership in result.scalars().all():
+                membership.is_active = False
+            # Create new branch membership
+            session.add(BranchMember(
+                branch_id=new_branch_id,
+                user_id=target.id,
+                assigned_by=action.initiated_by,
+            ))
+            await session.flush()
+    elif action.action_type == "revoke_role":
+        # Remove a specific role from the user
+        meta = action.metadata_ or {}
+        role_code = meta.get("role_code")
+        if role_code:
+            from app.models.user import UserRole
+            result = await session.execute(
+                select(UserRole).where(
+                    UserRole.user_id == target.id,
+                    UserRole.role_code == role_code,
+                )
+            )
+            role_obj = result.scalar_one_or_none()
+            if role_obj:
+                await session.delete(role_obj)
+                await session.flush()

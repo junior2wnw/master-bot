@@ -161,3 +161,149 @@ async def notification_worker(interval: float = 10.0) -> None:
         except Exception as e:
             logger.error("Notification worker error: %s", e)
         await asyncio.sleep(interval)
+
+
+# ── Event bus integration ──────────────────────────────────────
+
+from string import Template
+
+from app.core.events import Event, event_bus
+from app.models.notification import Notification, NotificationTemplate
+
+
+async def _create_notification_from_event(
+    event: Event,
+    *,
+    recipient_user_ids: list[int],
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+) -> None:
+    """Create DB notifications from an event, using a matching template."""
+    session_factory = get_async_session()
+    async with session_factory() as session:
+        result = await session.execute(
+            select(NotificationTemplate).where(
+                NotificationTemplate.event_type == event.type,
+                NotificationTemplate.is_active == True,  # noqa: E712
+            )
+        )
+        template = result.scalar_one_or_none()
+        if not template:
+            logger.debug("No active template for event %s", event.type)
+            return
+
+        safe_payload = {k: str(v) for k, v in event.payload.items()}
+        title = Template(template.title_template).safe_substitute(safe_payload)
+        body = Template(template.body_template).safe_substitute(safe_payload)
+
+        for uid in recipient_user_ids:
+            session.add(Notification(
+                user_id=uid,
+                event_type=event.type,
+                title=title,
+                body=body,
+                channel=template.channel or "telegram",
+                entity_type=entity_type,
+                entity_id=entity_id,
+            ))
+
+        await session.commit()
+        logger.info("Created %d notifications for event %s", len(recipient_user_ids), event.type)
+
+    # Try immediate delivery
+    try:
+        await dispatch_pending(batch_size=len(recipient_user_ids) + 5)
+    except Exception:
+        pass  # periodic worker will retry
+
+
+async def _on_estimate_for_review(event: Event) -> None:
+    """Notify admins when estimate needs review."""
+    from app.core.security import Role
+    session_factory = get_async_session()
+    async with session_factory() as session:
+        result = await session.execute(
+            select(User.id).join(User.roles).where(
+                User.is_active == True,  # noqa: E712
+            ).filter(
+                User.roles.any(role_code=Role.ADMIN.value)
+            )
+        )
+        admin_ids = list(result.scalars().all())
+    if admin_ids:
+        await _create_notification_from_event(
+            event, recipient_user_ids=admin_ids,
+            entity_type="estimate", entity_id=event.payload.get("estimate_id"),
+        )
+
+
+async def _on_order_assigned(event: Event) -> None:
+    """Notify master when order is assigned to them."""
+    master_id = event.payload.get("master_user_id")
+    if master_id:
+        await _create_notification_from_event(
+            event, recipient_user_ids=[master_id],
+            entity_type="order", entity_id=event.payload.get("order_id"),
+        )
+
+
+async def _on_order_completed(event: Event) -> None:
+    """Notify client when order is completed."""
+    client_id = event.payload.get("client_user_id")
+    if client_id:
+        await _create_notification_from_event(
+            event, recipient_user_ids=[client_id],
+            entity_type="order", entity_id=event.payload.get("order_id"),
+        )
+
+
+async def _on_payment_received(event: Event) -> None:
+    """Notify master when payment is received."""
+    master_id = event.payload.get("master_user_id")
+    if master_id:
+        await _create_notification_from_event(
+            event, recipient_user_ids=[master_id],
+            entity_type="order", entity_id=event.payload.get("order_id"),
+        )
+
+
+async def _on_discount_requested(event: Event) -> None:
+    """Notify admins about discount request."""
+    from app.core.security import Role
+    session_factory = get_async_session()
+    async with session_factory() as session:
+        result = await session.execute(
+            select(User.id).join(User.roles).where(
+                User.is_active == True,  # noqa: E712
+            ).filter(
+                User.roles.any(role_code=Role.ADMIN.value)
+            )
+        )
+        admin_ids = list(result.scalars().all())
+    if admin_ids:
+        await _create_notification_from_event(
+            event, recipient_user_ids=admin_ids,
+            entity_type="discount_request", entity_id=event.payload.get("discount_request_id"),
+        )
+
+
+async def _on_discount_resolved(event: Event) -> None:
+    """Notify master about discount approval/rejection."""
+    master_id = event.payload.get("master_user_id")
+    if master_id:
+        await _create_notification_from_event(
+            event, recipient_user_ids=[master_id],
+            entity_type="estimate", entity_id=event.payload.get("estimate_id"),
+        )
+
+
+def subscribe_event_handlers() -> None:
+    """Subscribe all notification handlers to the event bus. Call once at startup."""
+    event_bus.subscribe("estimate.for_review", _on_estimate_for_review)
+    event_bus.subscribe("order.assigned", _on_order_assigned)
+    event_bus.subscribe("order.completed", _on_order_completed)
+    event_bus.subscribe("payment.received", _on_payment_received)
+    event_bus.subscribe("discount.requested", _on_discount_requested)
+    event_bus.subscribe("discount.approved", _on_discount_resolved)
+    event_bus.subscribe("discount.rejected", _on_discount_resolved)
+    logger.info("Notification event handlers subscribed")

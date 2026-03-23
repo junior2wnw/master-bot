@@ -294,6 +294,16 @@ async def seed() -> None:
              "Смета на проверку", "📋 Новая смета #$estimate_id на сумму $total₽ ожидает вашего подтверждения."),
             ("invite_pending", "invite.pending_approval",
              "Новый мастер", "👤 Новый мастер $master_name ожидает подтверждения."),
+            ("order_assigned", "order.assigned",
+             "Назначен заказ", "🔨 Вам назначен заказ #$order_id. Свяжитесь с клиентом для уточнения деталей."),
+            ("order_completed", "order.completed",
+             "Заказ выполнен", "✅ Заказ #$order_id отмечен как выполненный."),
+            ("payment_received", "payment.received",
+             "Оплата получена", "💳 Получена оплата $amount по заказу #$order_id."),
+            ("estimate_approved", "estimate.approved",
+             "Смета согласована", "✅ Смета #$estimate_id одобрена и готова к работе."),
+            ("staffing_action", "staffing.action",
+             "Кадровое действие", "👤 $action_description для $target_name."),
         ]
         for code, event_type, title, body in templates:
             session.add(NotificationTemplate(
