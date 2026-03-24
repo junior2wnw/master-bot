@@ -1,4 +1,4 @@
-.PHONY: up down logs restart build migrate seed import-catalog test lint fmt shell db-shell setup
+.PHONY: up down logs restart build migrate seed import-catalog import-bundle build-catalog-bundle test lint fmt shell db-shell setup
 
 up:
 	docker compose up -d --build
@@ -47,6 +47,12 @@ health:
 
 import-catalog:
 	docker compose exec app python -m scripts.import_catalog $(file)
+
+import-bundle:
+	docker compose exec app python -m scripts.import_catalog_bundle
+
+build-catalog-bundle:
+	python -m scripts.build_catalog_bundle
 
 setup:
 	sudo bash deploy/setup.sh $(ARGS)

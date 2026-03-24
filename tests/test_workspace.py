@@ -28,7 +28,7 @@ def _notification(**overrides):
 def test_discount_request_routes_to_detail_card():
     notification = _notification()
     assert resolve_notification_callback(notification) == "disc_detail:42"
-    assert resolve_notification_target_label(notification) == "Открыть согласование"
+    assert resolve_notification_target_label(notification) == "Открыть скидку"
 
 
 def test_estimate_notification_routes_to_estimate_view():
@@ -45,7 +45,7 @@ def test_notification_serialization_marks_unread_and_includes_action_target():
     payload = serialize_notification(_notification())
     assert payload["is_unread"] is True
     assert payload["target_callback"] == "disc_detail:42"
-    assert payload["target_label"] == "Открыть согласование"
+    assert payload["target_label"] == "Открыть скидку"
 
 
 def test_read_notification_is_not_marked_unread():

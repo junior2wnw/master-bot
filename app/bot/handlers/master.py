@@ -18,7 +18,9 @@ from app.models.payment import Payment
 from app.services.auth import get_user_by_telegram_id
 from app.services.discount import create_discount_request
 from app.services.estimate import (
-    add_line_item, create_estimate, update_estimate_status,
+    add_line_item,
+    create_estimate,
+    update_estimate_status,
 )
 from app.services.notification import notify_estimate_for_review
 
@@ -176,7 +178,11 @@ async def cb_new_estimate(callback: CallbackQuery, session: AsyncSession) -> Non
 # ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("est_view:"))
-async def cb_view_estimate(callback: CallbackQuery, session: AsyncSession) -> None:
+async def cb_view_estimate(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
     estimate_id = int(callback.data.split(":")[1])
     est_data = await _load_estimate_data(session, estimate_id)
     if not est_data:
@@ -185,10 +191,52 @@ async def cb_view_estimate(callback: CallbackQuery, session: AsyncSession) -> No
 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     is_master = _can_access_estimates(user)
+    await state.update_data(active_estimate_id=estimate_id)
 
     await callback.message.edit_text(
         messages.estimate_summary(est_data),
         reply_markup=keyboards.estimate_actions(estimate_id, is_master=is_master, status=est_data["status"]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^est_items:(\d+):(\d+)$"))
+async def cb_estimate_items(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    parts = callback.data.split(":")
+    estimate_id, page = int(parts[1]), int(parts[2])
+    await state.update_data(active_estimate_id=estimate_id)
+    await _show_estimate_items_editor(callback, session, estimate_id, page=page)
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^eli_view:(\d+):(\d+)$"))
+async def cb_estimate_item_editor(
+    callback: CallbackQuery,
+    session: AsyncSession,
+) -> None:
+    parts = callback.data.split(":")
+    estimate_id, line_item_id = int(parts[1]), int(parts[2])
+    result = await session.execute(
+        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        await callback.answer("Позиция не найдена", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        messages.estimate_item_editor({
+            "name": item.name,
+            "quantity": float(item.quantity),
+            "unit": item.unit,
+            "unit_price": item.unit_price,
+            "subtotal": item.subtotal,
+        }),
+        reply_markup=keyboards.estimate_item_actions(estimate_id, line_item_id),
     )
     await callback.answer()
 
@@ -198,7 +246,11 @@ async def cb_view_estimate(callback: CallbackQuery, session: AsyncSession) -> No
 # ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("add_to_est:"))
-async def cb_add_to_estimate(callback: CallbackQuery, session: AsyncSession) -> None:
+async def cb_add_to_estimate(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
     """Add a catalog item to the master's active draft estimate."""
     item_id = int(callback.data.split(":")[1])
 
@@ -212,16 +264,31 @@ async def cb_add_to_estimate(callback: CallbackQuery, session: AsyncSession) -> 
     if not user:
         return
 
-    # Find or create active draft estimate
-    result = await session.execute(
-        select(Estimate)
-        .where(Estimate.master_id == user.id, Estimate.status == "draft")
-        .order_by(Estimate.created_at.desc())
-        .limit(1)
-    )
-    estimate = result.scalar_one_or_none()
+    data = await state.get_data()
+    active_estimate_id = data.get("active_estimate_id")
+    estimate = None
+
+    if active_estimate_id:
+        result = await session.execute(
+            select(Estimate).where(
+                Estimate.id == active_estimate_id,
+                Estimate.master_id == user.id,
+                Estimate.status == "draft",
+            )
+        )
+        estimate = result.scalar_one_or_none()
+
+    if not estimate:
+        result = await session.execute(
+            select(Estimate)
+            .where(Estimate.master_id == user.id, Estimate.status == "draft")
+            .order_by(Estimate.created_at.desc())
+            .limit(1)
+        )
+        estimate = result.scalar_one_or_none()
     if not estimate:
         estimate = await create_estimate(session, master_id=user.id)
+    await state.update_data(active_estimate_id=estimate.id)
 
     await add_line_item(
         session,
@@ -233,7 +300,7 @@ async def cb_add_to_estimate(callback: CallbackQuery, session: AsyncSession) -> 
         unit_price=item.price_recommended,
     )
 
-    await callback.answer(f"✅ {item.name} → смета #{estimate.id}")
+    await callback.answer(f"✅ {item.name} добавлена в смету #{estimate.id}")
 
     # Show updated estimate
     est_data = await _load_estimate_data(session, estimate.id)
@@ -253,7 +320,7 @@ async def cb_item_increment(callback: CallbackQuery, session: AsyncSession) -> N
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
     await _adjust_quantity(session, line_item_id, delta=1)
-    await _refresh_estimate_view(callback, session, estimate_id)
+    await _show_estimate_item_editor(callback, session, estimate_id, line_item_id)
     await callback.answer()
 
 
@@ -263,7 +330,7 @@ async def cb_item_decrement(callback: CallbackQuery, session: AsyncSession) -> N
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
     await _adjust_quantity(session, line_item_id, delta=-1)
-    await _refresh_estimate_view(callback, session, estimate_id)
+    await _show_estimate_item_editor(callback, session, estimate_id, line_item_id)
     await callback.answer()
 
 
@@ -284,8 +351,76 @@ async def cb_item_delete(callback: CallbackQuery, session: AsyncSession) -> None
         from app.services.estimate import _recalculate_version
         await _recalculate_version(session, item.version_id)
 
-    await _refresh_estimate_view(callback, session, estimate_id)
+    await _show_estimate_items_editor(callback, session, estimate_id, page=1)
     await callback.answer("🗑 Удалено")
+
+
+@router.callback_query(F.data.regexp(r"^eli_qty:(\d+):(\d+)$"))
+async def cb_item_set_quantity(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    parts = callback.data.split(":")
+    estimate_id, line_item_id = int(parts[1]), int(parts[2])
+    result = await session.execute(
+        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        await callback.answer("Позиция не найдена", show_alert=True)
+        return
+
+    await state.update_data(
+        quantity_estimate_id=estimate_id,
+        quantity_line_item_id=line_item_id,
+    )
+    await state.set_state(EstimateStates.setting_quantity)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Позиция", callback_data=f"eli_view:{estimate_id}:{line_item_id}"))
+    await callback.message.edit_text(
+        messages.estimate_quantity_prompt(item.name, float(item.quantity), item.unit),
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.message(EstimateStates.setting_quantity)
+async def msg_set_estimate_quantity(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    data = await state.get_data()
+    estimate_id = data.get("quantity_estimate_id")
+    line_item_id = data.get("quantity_line_item_id")
+    if not estimate_id or not line_item_id:
+        await state.clear()
+        return
+
+    raw_value = message.text.strip().replace(",", ".")
+    try:
+        quantity = float(raw_value)
+    except ValueError:
+        await message.answer("⚠️ Введите число. Примеры: 1, 2, 2.5")
+        return
+
+    if quantity <= 0:
+        await message.answer("⚠️ Количество должно быть больше нуля.")
+        return
+
+    await _set_quantity(session, line_item_id, quantity)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="🧾 К позиции", callback_data=f"eli_view:{estimate_id}:{line_item_id}"),
+        InlineKeyboardButton(text="← К смете", callback_data=f"est_view:{estimate_id}"),
+    )
+    await message.answer(
+        "✅ Количество обновлено.",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(F.data.startswith("est_clear:"))
@@ -628,6 +763,64 @@ def _empty_estimate_data(estimate) -> dict:
     }
 
 
+async def _show_estimate_items_editor(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    estimate_id: int,
+    *,
+    page: int,
+) -> None:
+    est_data = await _load_estimate_data(session, estimate_id)
+    if not est_data:
+        await callback.answer("Смета не найдена", show_alert=True)
+        return
+
+    items = est_data["items"]
+    if not items:
+        await callback.message.edit_text(
+            messages.estimate_items_empty(estimate_id),
+            reply_markup=keyboards.estimate_items_list(estimate_id, [], 1, 1),
+        )
+        return
+
+    page_items, total_pages, current = paginate(items, page, PER_PAGE)
+    await callback.message.edit_text(
+        messages.estimate_items_overview(estimate_id, len(items)),
+        reply_markup=keyboards.estimate_items_list(
+            estimate_id,
+            page_items,
+            current,
+            total_pages,
+        ),
+    )
+
+
+async def _show_estimate_item_editor(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    estimate_id: int,
+    line_item_id: int,
+) -> None:
+    result = await session.execute(
+        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        await _show_estimate_items_editor(callback, session, estimate_id, page=1)
+        return
+
+    await callback.message.edit_text(
+        messages.estimate_item_editor({
+            "name": item.name,
+            "quantity": float(item.quantity),
+            "unit": item.unit,
+            "unit_price": item.unit_price,
+            "subtotal": item.subtotal,
+        }),
+        reply_markup=keyboards.estimate_item_actions(estimate_id, line_item_id),
+    )
+
+
 async def _refresh_estimate_view(callback: CallbackQuery, session: AsyncSession, estimate_id: int) -> None:
     """Reload and display estimate."""
     est_data = await _load_estimate_data(session, estimate_id)
@@ -707,7 +900,10 @@ async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None
 
     try:
         export_est, export_profile = await _build_export_data(session, estimate_id, user)
-        from app.services.estimate_export import generate_payment_qr, _generate_qr_image, _build_qr_payload
+        from app.services.estimate_export import (
+            _build_qr_payload,
+            _generate_qr_image,
+        )
 
         if not export_profile.bank_name and not export_profile.sbp_phone and not export_profile.card_number:
             await callback.message.answer(
@@ -857,6 +1053,26 @@ async def _adjust_quantity(session: AsyncSession, line_item_id: int, delta: int)
     item.quantity = new_qty
     coef = prod((item.coefficients_applied or {}).values()) if item.coefficients_applied else 1.0
     item.subtotal = int(item.unit_price * new_qty * coef)
+    await session.flush()
+
+    from app.services.estimate import _recalculate_version
+    await _recalculate_version(session, item.version_id)
+
+
+async def _set_quantity(session: AsyncSession, line_item_id: int, quantity: float) -> None:
+    """Set exact line item quantity with recalculation."""
+    from math import prod
+
+    result = await session.execute(
+        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        return
+
+    item.quantity = quantity
+    coef = prod((item.coefficients_applied or {}).values()) if item.coefficients_applied else 1.0
+    item.subtotal = int(item.unit_price * quantity * coef)
     await session.flush()
 
     from app.services.estimate import _recalculate_version

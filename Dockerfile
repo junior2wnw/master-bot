@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools && \
 
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/
+COPY data/ ./data/
 COPY alembic.ini ./
 
 EXPOSE 8000

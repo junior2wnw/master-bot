@@ -31,6 +31,7 @@ class AdminStates(StatesGroup):
     adding_item = State()
     searching_item = State()
     branch_name = State()
+    staffing_reason = State()
 
 
 async def _check_admin(callback: CallbackQuery, session: AsyncSession):
@@ -58,7 +59,7 @@ async def cb_admin_panel(callback: CallbackQuery, session: AsyncSession) -> None
     )).scalar()
     estimates_count = (await session.execute(select(func.count(Estimate.id)))).scalar()
     invites_count = (await session.execute(
-        select(func.count(Invite.id)).where(Invite.is_active == True)
+        select(func.count(Invite.id)).where(Invite.is_active)
     )).scalar()
 
     stats = {
@@ -144,7 +145,7 @@ async def cb_admin_user_detail(callback: CallbackQuery, session: AsyncSession) -
     # Find branch
     branch_name = None
     bm_result = await session.execute(
-        select(BranchMember).where(BranchMember.user_id == user_id, BranchMember.is_active == True)
+        select(BranchMember).where(BranchMember.user_id == user_id, BranchMember.is_active)
     )
     bm = bm_result.scalar_one_or_none()
     if bm:
@@ -201,6 +202,285 @@ async def cb_admin_user_roles(callback: CallbackQuery, session: AsyncSession) ->
     text = f"🔑 <b>Роли пользователя</b>\n\nТекущие: {', '.join(current_roles)}"
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_user_branch:"))
+async def cb_admin_user_branch(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show current branch assignment and allow reassignment."""
+    if not await _check_admin(callback, session):
+        return
+
+    user_id = int(callback.data.split(":")[1])
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    current_membership = (
+        await session.execute(
+            select(BranchMember).where(
+                BranchMember.user_id == user_id,
+                BranchMember.is_active,
+            )
+        )
+    ).scalar_one_or_none()
+
+    current_branch = None
+    if current_membership:
+        current_branch = (
+            await session.execute(select(Branch).where(Branch.id == current_membership.branch_id))
+        ).scalar_one_or_none()
+
+    branches = (
+        await session.execute(select(Branch).where(Branch.is_active).order_by(Branch.name))
+    ).scalars().all()
+
+    branch_line = current_branch.name if current_branch else "Не назначен, работает напрямую"
+    can_be_assigned = any(role in target_user.role_codes for role in ("master", "senior_master"))
+    text = (
+        f"🏗 <b>Назначение в ветку</b>\n\n"
+        f"Пользователь: <b>{target_user.display_name}</b>\n"
+        f"Текущая ветка: <b>{branch_line}</b>\n"
+        f"Роли: {', '.join(target_user.role_codes)}\n\n"
+        + (
+            "Выберите ветку ниже или снимите пользователя с текущей ветки."
+            if can_be_assigned
+            else "Назначение в ветки доступно только мастерам и старшим мастерам."
+        )
+    )
+
+    kb = InlineKeyboardBuilder()
+    if can_be_assigned:
+        for branch in branches:
+            prefix = "✅" if current_branch and current_branch.id == branch.id else "📁"
+            kb.row(
+                InlineKeyboardButton(
+                    text=f"{prefix} {branch.name}",
+                    callback_data=f"adm_branch_assign:{user_id}:{branch.id}",
+                ),
+            )
+    if current_branch and can_be_assigned:
+        kb.row(InlineKeyboardButton(text="🚫 Снять с ветки", callback_data=f"adm_branch_unassign:{user_id}"))
+    kb.row(InlineKeyboardButton(text="← Пользователь", callback_data=f"adm_user:{user_id}"))
+
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm_branch_assign:(\d+):(\d+)$"))
+async def cb_admin_assign_branch(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    _, user_id_str, branch_id_str = callback.data.split(":")
+    user_id, branch_id = int(user_id_str), int(branch_id_str)
+    admin = await get_user_by_telegram_id(session, callback.from_user.id)
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    branch = (
+        await session.execute(select(Branch).where(Branch.id == branch_id))
+    ).scalar_one_or_none()
+    if not target_user or not branch:
+        await callback.answer("Ветка или пользователь не найдены", show_alert=True)
+        return
+    if not any(role in target_user.role_codes for role in ("master", "senior_master")):
+        await callback.answer("В ветки можно назначать только мастеров", show_alert=True)
+        return
+
+    memberships = (
+        await session.execute(
+            select(BranchMember).where(
+                BranchMember.user_id == user_id,
+                BranchMember.is_active,
+            )
+        )
+    ).scalars().all()
+    old_branch_ids = {membership.branch_id for membership in memberships}
+    for membership in memberships:
+        membership.is_active = False
+    if old_branch_ids:
+        old_branches = (
+            await session.execute(select(Branch).where(Branch.id.in_(old_branch_ids)))
+        ).scalars().all()
+        for old_branch in old_branches:
+            if old_branch.senior_master_id == target_user.id:
+                old_branch.senior_master_id = None
+
+    is_senior = "senior_master" in target_user.role_codes
+    session.add(BranchMember(
+        branch_id=branch.id,
+        user_id=target_user.id,
+        is_senior=is_senior,
+        assigned_by=admin.id if admin else None,
+    ))
+    if is_senior:
+        branch.senior_master_id = target_user.id
+
+    from app.core.audit import log_audit
+    await session.flush()
+    await log_audit(
+        session,
+        user_id=admin.id if admin else None,
+        action="branch.assignment_changed",
+        entity_type="user",
+        entity_id=target_user.id,
+        new_value={"branch_id": branch.id, "branch_name": branch.name, "is_senior": is_senior},
+    )
+
+    await callback.answer(f"✅ {target_user.display_name} назначен в ветку {branch.name}", show_alert=True)
+    callback.data = f"adm_user_branch:{user_id}"
+    await cb_admin_user_branch(callback, session)
+
+
+@router.callback_query(F.data.regexp(r"^adm_branch_unassign:(\d+)$"))
+async def cb_admin_unassign_branch(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    user_id = int(callback.data.split(":")[1])
+    admin = await get_user_by_telegram_id(session, callback.from_user.id)
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    memberships = (
+        await session.execute(
+            select(BranchMember).where(
+                BranchMember.user_id == user_id,
+                BranchMember.is_active,
+            )
+        )
+    ).scalars().all()
+    affected_branch_ids = {membership.branch_id for membership in memberships}
+    for membership in memberships:
+        membership.is_active = False
+
+    branches = (
+        await session.execute(select(Branch).where(Branch.id.in_(affected_branch_ids)))
+    ).scalars().all() if affected_branch_ids else []
+    for branch in branches:
+        if branch.senior_master_id == user_id:
+            branch.senior_master_id = None
+
+    from app.core.audit import log_audit
+    await session.flush()
+    await log_audit(
+        session,
+        user_id=admin.id if admin else None,
+        action="branch.assignment_removed",
+        entity_type="user",
+        entity_id=target_user.id,
+    )
+
+    await callback.answer(f"✅ {target_user.display_name} снят с ветки", show_alert=True)
+    callback.data = f"adm_user_branch:{user_id}"
+    await cb_admin_user_branch(callback, session)
+
+
+@router.callback_query(F.data.startswith("adm_user_staff:"))
+async def cb_admin_user_staff(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show staffing actions available for a user."""
+    if not await _check_admin(callback, session):
+        return
+
+    user_id = int(callback.data.split(":")[1])
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    text = (
+        f"👷 <b>Кадровое действие</b>\n\n"
+        f"Пользователь: <b>{target_user.display_name}</b>\n"
+        f"Статус: <b>{'активен' if target_user.is_active else 'неактивен'}</b>\n\n"
+        "Выберите действие. После этого бот попросит причину и создаст audit-след."
+    )
+    kb = InlineKeyboardBuilder()
+    if target_user.is_active:
+        kb.row(
+            InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"adm_staff_init:{user_id}:suspend"),
+            InlineKeyboardButton(text="🚫 Деактивировать", callback_data=f"adm_staff_init:{user_id}:deactivate"),
+        )
+        kb.row(InlineKeyboardButton(text="❌ Завершить сотрудничество", callback_data=f"adm_staff_init:{user_id}:terminate"))
+    else:
+        kb.row(InlineKeyboardButton(text="✅ Восстановить", callback_data=f"adm_staff_init:{user_id}:restore"))
+    kb.row(InlineKeyboardButton(text="← Пользователь", callback_data=f"adm_user:{user_id}"))
+
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm_staff_init:(\d+):([a-z_]+)$"))
+async def cb_admin_staff_init(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    _, user_id_str, action_type = callback.data.split(":")
+    user_id = int(user_id_str)
+    await state.update_data(staff_target_user_id=user_id, staff_action_type=action_type)
+    await state.set_state(AdminStates.staffing_reason)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Кадровые действия", callback_data=f"adm_user_staff:{user_id}"))
+    await callback.message.edit_text(
+        "📝 Укажите причину.\n\n"
+        "Причина попадёт в кадровое действие, аудит и историю модерации.",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.staffing_reason)
+async def msg_admin_staff_reason(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    target_user_id = data.get("staff_target_user_id")
+    action_type = data.get("staff_action_type")
+    if not target_user_id or not action_type:
+        await state.clear()
+        return
+
+    reason = message.text.strip()
+    if len(reason) < 4:
+        await message.answer("⚠️ Причина слишком короткая. Напишите чуть подробнее.")
+        return
+
+    initiator = await get_user_by_telegram_id(session, message.from_user.id)
+    target_user = (
+        await session.execute(select(User).where(User.id == target_user_id))
+    ).scalar_one_or_none()
+    if not initiator or not target_user:
+        await state.clear()
+        return
+
+    from app.services.staffing import initiate_action
+
+    action = await initiate_action(
+        session,
+        action_type=action_type,
+        target=target_user,
+        initiator=initiator,
+        reason=reason,
+    )
+    await state.clear()
+
+    status_label = {
+        "executed": "выполнено сразу",
+        "pending": "отправлено на подтверждение",
+    }.get(action.status, action.status)
+    await message.answer(
+        f"✅ Кадровое действие создано.\n"
+        f"Тип: <b>{action.action_type}</b>\n"
+        f"Пользователь: <b>{target_user.display_name}</b>\n"
+        f"Статус: <b>{status_label}</b>",
+    )
 
 
 @router.callback_query(F.data.regexp(r"^adm_grant:(\d+):(\w+)$"))
@@ -288,7 +568,7 @@ async def cb_invite_list(callback: CallbackQuery, session: AsyncSession) -> None
         return
 
     result = await session.execute(
-        select(Invite).where(Invite.is_active == True).order_by(Invite.created_at.desc()).limit(20)
+        select(Invite).where(Invite.is_active).order_by(Invite.created_at.desc()).limit(20)
     )
     invites = result.scalars().all()
 
@@ -406,6 +686,80 @@ async def cb_admin_catalog(callback: CallbackQuery, session: AsyncSession) -> No
     await callback.message.edit_text(
         "📋 <b>Управление каталогом</b>\n\nВыберите направление или действие:",
         reply_markup=keyboards.admin_catalog_menu(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm_item_search")
+async def cb_admin_item_search(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    await state.set_state(AdminStates.searching_item)
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+    await callback.message.edit_text(
+        "🔍 <b>Поиск работы в каталоге</b>\n\n"
+        "Введите название, код или ключевое слово.\n"
+        "После этого можно будет открыть карточку и изменить цену или активность.",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.searching_item)
+async def msg_admin_item_search(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    query = message.text.strip()
+    if len(query) < 2:
+        await message.answer("⚠️ Введите минимум 2 символа.")
+        return
+
+    from app.services import catalog as catalog_svc
+
+    items = await catalog_svc.search_items(session, query, limit=12)
+    if not items:
+        items = await catalog_svc.search_items_simple(session, query, limit=12)
+
+    kb = InlineKeyboardBuilder()
+    if not items:
+        kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+        await message.answer(
+            f"🔍 По запросу «<b>{query}</b>» ничего не найдено.\n"
+            "Попробуйте другое слово или код работы.",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    for item in items:
+        price = f" · {item.price_recommended:,}₽".replace(",", " ") if item.price_recommended else ""
+        title = item.name[:34] + "…" if len(item.name) > 35 else item.name
+        kb.row(InlineKeyboardButton(text=f"✏️ {title}{price}", callback_data=f"adm_item:{item.id}"))
+    kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+    await message.answer(
+        f"🔍 Найдено: <b>{len(items)}</b>\n"
+        "Откройте работу, чтобы быстро отредактировать её.",
+        reply_markup=kb.as_markup(),
+    )
+    await state.clear()
+
+
+@router.callback_query(F.data == "adm_item_add")
+async def cb_admin_item_add(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="🔍 Найти и отредактировать", callback_data="adm_item_search"),
+        InlineKeyboardButton(text="📱 Открыть приложение", callback_data="open_webapp"),
+    )
+    kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+    await callback.message.edit_text(
+        "➕ <b>Новая работа</b>\n\n"
+        "В боте уже доступно быстрое редактирование существующего каталога: цены, активность и поиск.\n"
+        "Полное создание новой карточки лучше делать в Mini App, чтобы не потерять важные поля каталога:\n"
+        "профессию, группу, подгруппу, unit, alias, hashtags и правила поиска.",
+        reply_markup=kb.as_markup(),
     )
     await callback.answer()
 
@@ -610,7 +964,7 @@ async def cb_admin_branches(callback: CallbackQuery, session: AsyncSession) -> N
     if not await _check_admin(callback, session):
         return
 
-    result = await session.execute(select(Branch).where(Branch.is_active == True))
+    result = await session.execute(select(Branch).where(Branch.is_active))
     branches = result.scalars().all()
 
     text = f"🏗 <b>Ветки</b> ({len(branches)})\n\n"
@@ -619,7 +973,7 @@ async def cb_admin_branches(callback: CallbackQuery, session: AsyncSession) -> N
     for b in branches:
         members_count = (await session.execute(
             select(func.count(BranchMember.id))
-            .where(BranchMember.branch_id == b.id, BranchMember.is_active == True)
+            .where(BranchMember.branch_id == b.id, BranchMember.is_active)
         )).scalar() or 0
         text += f"• {b.name}: {members_count} мастеров\n"
         kb.row(InlineKeyboardButton(
@@ -685,7 +1039,7 @@ async def cb_admin_branch_detail(callback: CallbackQuery, session: AsyncSession)
         return
 
     members_result = await session.execute(
-        select(BranchMember).where(BranchMember.branch_id == branch_id, BranchMember.is_active == True)
+        select(BranchMember).where(BranchMember.branch_id == branch_id, BranchMember.is_active)
     )
     members = members_result.scalars().all()
 

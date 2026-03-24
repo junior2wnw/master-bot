@@ -14,7 +14,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.bot.ui import add_back_row, add_pagination_row, grid_buttons
 
-
 # ═══════════════════════════════════════════════════════════════
 # MAIN MENU
 # ═══════════════════════════════════════════════════════════════
@@ -180,6 +179,17 @@ def search_results(items: list[dict], query: str, page: int = 1, total_pages: in
     return kb.as_markup()
 
 
+def search_entry_actions() -> InlineKeyboardMarkup:
+    """Quick ways to start search without overwhelming the user."""
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="⭐ Популярное", callback_data="popular"),
+        InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
+    )
+    add_back_row(kb, "Меню", "main_menu")
+    return kb.as_markup()
+
+
 # ═══════════════════════════════════════════════════════════════
 # ESTIMATES (Cart-style)
 # ═══════════════════════════════════════════════════════════════
@@ -205,14 +215,15 @@ def estimate_actions(estimate_id: int, is_master: bool = False, status: str = "d
 
     if is_master and status == "draft":
         kb.row(
-            InlineKeyboardButton(text="➕ Добавить", callback_data=f"est_search:{estimate_id}"),
-            InlineKeyboardButton(text="📋 Каталог", callback_data=f"est_catalog:{estimate_id}"),
+            InlineKeyboardButton(text="➕ Добавить работу", callback_data=f"est_search:{estimate_id}"),
+            InlineKeyboardButton(text="🧾 Позиции", callback_data=f"est_items:{estimate_id}:1"),
         )
         kb.row(
+            InlineKeyboardButton(text="📚 Каталог", callback_data=f"est_catalog:{estimate_id}"),
             InlineKeyboardButton(text="💸 Скидка", callback_data=f"est_discount:{estimate_id}"),
-            InlineKeyboardButton(text="📤 Клиенту", callback_data=f"est_send:{estimate_id}"),
         )
         kb.row(
+            InlineKeyboardButton(text="📤 Клиенту", callback_data=f"est_send:{estimate_id}"),
             InlineKeyboardButton(text="🗑 Очистить", callback_data=f"est_clear:{estimate_id}"),
         )
 
@@ -240,11 +251,37 @@ def estimate_item_actions(estimate_id: int, line_item_id: int) -> InlineKeyboard
     """Per-item controls in estimate."""
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="−", callback_data=f"eli_dec:{estimate_id}:{line_item_id}"),
-        InlineKeyboardButton(text="Кол-во", callback_data=f"eli_qty:{estimate_id}:{line_item_id}"),
-        InlineKeyboardButton(text="+", callback_data=f"eli_inc:{estimate_id}:{line_item_id}"),
+        InlineKeyboardButton(text="− 1", callback_data=f"eli_dec:{estimate_id}:{line_item_id}"),
+        InlineKeyboardButton(text="Ввести кол-во", callback_data=f"eli_qty:{estimate_id}:{line_item_id}"),
+        InlineKeyboardButton(text="+ 1", callback_data=f"eli_inc:{estimate_id}:{line_item_id}"),
     )
     kb.row(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"eli_del:{estimate_id}:{line_item_id}"))
+    add_back_row(kb, "Позиции сметы", f"est_items:{estimate_id}:1")
+    return kb.as_markup()
+
+
+def estimate_items_list(
+    estimate_id: int,
+    items: list[dict],
+    page: int = 1,
+    total_pages: int = 1,
+) -> InlineKeyboardMarkup:
+    """List estimate positions as editable cards."""
+    kb = InlineKeyboardBuilder()
+    for item in items:
+        qty = f"{item['quantity']}".rstrip("0").rstrip(".")
+        amount = f"{item['subtotal']:,}₽".replace(",", " ")
+        name = item["name"]
+        if len(name) > 28:
+            name = name[:25] + "…"
+        kb.row(
+            InlineKeyboardButton(
+                text=f"{name} · {qty} {item['unit']} · {amount}",
+                callback_data=f"eli_view:{estimate_id}:{item['id']}",
+            ),
+        )
+    add_pagination_row(kb, page, total_pages, f"est_items:{estimate_id}")
+    kb.row(InlineKeyboardButton(text="➕ Добавить работу", callback_data=f"est_search:{estimate_id}"))
     add_back_row(kb, "Смета", f"est_view:{estimate_id}")
     return kb.as_markup()
 

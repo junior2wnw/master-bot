@@ -5,10 +5,16 @@ Rich formatting: dashboards, cards, stat blocks, progress indicators.
 """
 
 from app.bot.ui import (
-    BLOCK_LINE, ESTIMATE_STATUS_RU, ORDER_STATUS, ORDER_STATUS_RU,
-    THIN_LINE, URGENCY_RU, header, money, stat_line,
+    BLOCK_LINE,
+    ESTIMATE_STATUS_RU,
+    ORDER_STATUS,
+    ORDER_STATUS_RU,
+    THIN_LINE,
+    URGENCY_RU,
+    header,
+    money,
+    stat_line,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # START / NAVIGATION
@@ -16,23 +22,39 @@ from app.bot.ui import (
 
 def welcome(name: str, stats: dict | None = None) -> str:
     s = stats or {}
-    text = f"👋 <b>{name}</b>, добро пожаловать!\n{THIN_LINE}\n"
+    text = f"👋 <b>{name}</b>\n{THIN_LINE}\n"
 
-    # Show mini-dashboard if user has activity
-    parts = []
-    if s.get("active_estimates"):
-        parts.append(f"📊 Активных смет: {s['active_estimates']}")
-    if s.get("active_orders"):
-        parts.append(f"📝 Активных заказов: {s['active_orders']}")
+    urgent_parts = []
     if s.get("pending_approvals"):
-        parts.append(f"⏳ Ожидают действия: {s['pending_approvals']}")
+        urgent_parts.append(f"✅ Согласования: <b>{s['pending_approvals']}</b>")
+    if s.get("client_reviews"):
+        urgent_parts.append(f"👀 Клиент ждёт ответ: <b>{s['client_reviews']}</b>")
     if s.get("unread_notifications"):
-        parts.append(f"🔔 Уведомлений: {s['unread_notifications']}")
+        urgent_parts.append(f"🔔 Новых уведомлений: <b>{s['unread_notifications']}</b>")
 
-    if parts:
-        text += "\n".join(parts) + f"\n{THIN_LINE}\n"
+    working_parts = []
+    if s.get("active_estimates"):
+        working_parts.append(f"📊 Активных смет: <b>{s['active_estimates']}</b>")
+    if s.get("active_orders"):
+        working_parts.append(f"📝 Активных заказов: <b>{s['active_orders']}</b>")
 
-    text += "Выберите действие:"
+    if urgent_parts:
+        text += "<b>Сейчас важно</b>\n" + "\n".join(urgent_parts)
+    if working_parts:
+        if urgent_parts:
+            text += f"\n{THIN_LINE}\n"
+        text += "<b>В работе</b>\n" + "\n".join(working_parts)
+
+    if not urgent_parts and not working_parts:
+        text += (
+            "Быстрый старт:\n"
+            "• откройте каталог, если хотите собрать работы вручную;\n"
+            "• используйте поиск, если знаете, что нужно;\n"
+            "• центр работы покажет все задачи, где нужен ваш ответ."
+        )
+    else:
+        text += f"\n{THIN_LINE}\n"
+        text += "Выберите, куда перейти дальше:"
     return text
 
 
@@ -110,10 +132,10 @@ def item_detail(item: dict) -> str:
 def search_prompt() -> str:
     return (
         f"{header('🔍', 'Поиск работ')}\n\n"
-        "Введите название, ключевое слово или хэштег.\n"
-        "Примеры: <i>розетка</i>, <i>люстра</i>, <i>смеситель</i>\n\n"
-        "💡 Также можно искать через <code>@имя_бота запрос</code>\n"
-        "прямо в любом чате."
+        "Напишите простыми словами, что нужно сделать.\n"
+        "Подойдут название работы, проблема, предмет или ключевое слово.\n\n"
+        "Примеры: <i>розетка</i>, <i>замена смесителя</i>, <i>сборка шкафа</i>, <i>чистка ноутбука</i>\n\n"
+        "💡 Можно искать и через <code>@имя_бота запрос</code> прямо в любом чате."
     )
 
 
@@ -121,10 +143,14 @@ def search_results(items: list[dict], query: str, total: int = 0) -> str:
     if not items:
         return (
             f"🔍 По запросу «<b>{query}</b>» ничего не найдено.\n\n"
-            "Попробуйте другие слова или используйте каталог."
+            "Попробуйте короче, проще или другими словами.\n"
+            "Если задача типовая, откройте каталог или популярные работы."
         )
     count_text = f" ({total})" if total > len(items) else ""
-    return f"🔍 Результаты: «<b>{query}</b>»{count_text}\n\nВыберите работу:"
+    return (
+        f"🔍 <b>Найдено по запросу:</b> «{query}»{count_text}\n\n"
+        "Откройте работу, чтобы посмотреть цену, детали и добавить её в смету."
+    )
 
 
 def popular_items_header() -> str:
@@ -174,6 +200,8 @@ def estimate_summary(estimate: dict) -> str:
         text += f"\n👤 Клиент: {estimate['client_name']}"
     if estimate.get("master_name"):
         text += f"\n🔧 Мастер: {estimate['master_name']}"
+    if estimate.get("items") and estimate.get("status") == "draft":
+        text += "\n\n💡 Чтобы изменить объём или удалить позицию, откройте кнопку «Позиции»."
 
     return text
 
@@ -183,6 +211,45 @@ def estimate_empty() -> str:
         f"{header('📊', 'Мои сметы')}\n\n"
         "У вас пока нет смет.\n"
         "Создайте первую через кнопку ниже."
+    )
+
+
+def estimate_items_overview(estimate_id: int, item_count: int) -> str:
+    return (
+        f"{header('🧾', f'Позиции сметы #{estimate_id}', f'{item_count} позиций')}\n"
+        f"{THIN_LINE}\n"
+        "Откройте позицию, чтобы быстро изменить количество или удалить её из сметы."
+    )
+
+
+def estimate_items_empty(estimate_id: int) -> str:
+    return (
+        f"{header('🧾', f'Позиции сметы #{estimate_id}')}\n\n"
+        "Смета пока пустая.\n"
+        "Добавьте первую работу через поиск или каталог."
+    )
+
+
+def estimate_item_editor(item: dict) -> str:
+    qty = f"{item['quantity']}".rstrip("0").rstrip(".")
+    return (
+        f"{header('🧾', item['name'])}\n"
+        f"{THIN_LINE}\n"
+        f"Количество: <b>{qty} {item['unit']}</b>\n"
+        f"Цена за единицу: <b>{money(item['unit_price'])}</b>\n"
+        f"Сумма позиции: <b>{money(item['subtotal'])}</b>\n\n"
+        "Можно быстро прибавить/убавить 1 или ввести точное количество вручную."
+    )
+
+
+def estimate_quantity_prompt(item_name: str, current_quantity: float, unit: str) -> str:
+    qty = f"{current_quantity}".rstrip("0").rstrip(".")
+    return (
+        f"{header('✏️', 'Изменить количество')}\n\n"
+        f"<b>{item_name}</b>\n"
+        f"Сейчас: <b>{qty} {unit}</b>\n\n"
+        "Введите новое количество числом.\n"
+        "Примеры: <code>1</code>, <code>2</code>, <code>2.5</code>"
     )
 
 
@@ -204,7 +271,7 @@ def estimate_for_review(estimate: dict) -> str:
         f"{THIN_LINE}\n"
     )
     text += estimate_summary(estimate)
-    text += f"\n\n✅ Согласовать или ❌ отклонить?"
+    text += "\n\n✅ Согласовать или ❌ отклонить?"
     return text
 
 

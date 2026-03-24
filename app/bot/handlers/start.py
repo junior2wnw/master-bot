@@ -262,17 +262,26 @@ def _main_menu_markup(roles: list[str], summary: dict):
         + summary.get("invite_pending", 0)
         + summary.get("staffing_pending", 0)
     )
-    workbench_label = "⚡ Центр работы"
+    workbench_label = "⚡ Что сделать"
     if workbench_count:
         workbench_label += f" ({workbench_count})"
 
-    inbox_label = "🔔 Inbox"
+    inbox_label = "🔔 Уведомления"
     if summary.get("unread_notifications"):
         inbox_label += f" ({summary['unread_notifications']})"
     kb.row(
         InlineKeyboardButton(text=workbench_label, callback_data="workbench"),
         InlineKeyboardButton(text=inbox_label, callback_data="inbox"),
     )
+
+    quick_buttons = []
+    if any(role in roles for role in ("master", "senior_master", "admin", "product_owner")):
+        quick_buttons.append(InlineKeyboardButton(text="🧮 Новая смета", callback_data="est_new"))
+    if "client" in roles:
+        quick_buttons.append(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
+    if quick_buttons:
+        kb.row(*quick_buttons[:2])
+
     kb.row(
         InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
         InlineKeyboardButton(text="🔍 Поиск", callback_data="search"),
@@ -320,14 +329,19 @@ def _action_center_markup(actions: list[dict]):
     kb = InlineKeyboardBuilder()
     for action in actions:
         title = action.get("title", "Открыть")
-        if len(title) > 34:
-            title = title[:31] + "…"
+        if len(title) > 38:
+            title = title[:35] + "…"
         kb.row(InlineKeyboardButton(
             text=f"{action.get('icon', '•')} {title}",
             callback_data=action.get("callback", "main_menu"),
         ))
+    if not actions:
+        kb.row(
+            InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
+            InlineKeyboardButton(text="🔍 Поиск", callback_data="search"),
+        )
     kb.row(
-        InlineKeyboardButton(text="🔔 Inbox", callback_data="inbox"),
+        InlineKeyboardButton(text="🔔 Уведомления", callback_data="inbox"),
         InlineKeyboardButton(text="← Меню", callback_data="main_menu"),
     )
     return kb.as_markup()
@@ -351,9 +365,9 @@ def _notifications_markup(notifications: list[dict]):
 def _notification_detail_markup(target_callback: str, target_label: str | None):
     kb = InlineKeyboardBuilder()
     if target_callback and target_label:
-        kb.row(InlineKeyboardButton(text=target_label, callback_data=target_callback))
+        kb.row(InlineKeyboardButton(text=f"➡️ {target_label}", callback_data=target_callback))
     kb.row(
-        InlineKeyboardButton(text="🔔 Ко всем уведомлениям", callback_data="inbox"),
+        InlineKeyboardButton(text="🔔 Все уведомления", callback_data="inbox"),
         InlineKeyboardButton(text="← Меню", callback_data="main_menu"),
     )
     return kb.as_markup()
@@ -362,12 +376,13 @@ def _notification_detail_markup(target_callback: str, target_label: str | None):
 def _render_action_center(actions: list[dict], unread_count: int) -> str:
     if not actions:
         return (
-            "⚡ <b>Центр работы</b>\n\n"
-            "Сейчас нет срочных действий.\n"
+            "⚡ <b>Что сделать сейчас</b>\n\n"
+            "Срочных действий нет.\n"
+            "Можно перейти в каталог, поиск или просто проверить уведомления.\n\n"
             f"Непрочитанных уведомлений: <b>{unread_count}</b>"
         )
 
-    lines = ["⚡ <b>Центр работы</b>\n"]
+    lines = [f"⚡ <b>Что сделать сейчас</b>\nНайдено задач: <b>{len(actions)}</b>\n"]
     for index, action in enumerate(actions, start=1):
         lines.append(
             f"{index}. {action.get('icon', '•')} <b>{action.get('title', 'Действие')}</b>\n"
@@ -375,18 +390,19 @@ def _render_action_center(actions: list[dict], unread_count: int) -> str:
         )
     if unread_count:
         lines.append(f"\n🔔 Непрочитанных уведомлений: <b>{unread_count}</b>")
+    lines.append("\nНажмите на нужную карточку ниже.")
     return "\n".join(lines)
 
 
 def _render_inbox(notifications: list[dict], unread_count: int) -> str:
     if not notifications:
-        return "🔔 <b>Inbox</b>\n\nНовых уведомлений пока нет."
+        return "🔔 <b>Уведомления</b>\n\nПока пусто. Когда потребуется действие, бот пришлёт его сюда."
 
-    lines = [f"🔔 <b>Inbox</b>\nНепрочитанных: <b>{unread_count}</b>\n"]
+    lines = [f"🔔 <b>Уведомления</b>\nНепрочитанных: <b>{unread_count}</b>\n"]
     for item in notifications[:8]:
         marker = "•" if item.get("is_unread") else "◦"
         lines.append(f"{marker} <b>{item['title']}</b>")
-    lines.append("\nОткройте карточку, чтобы перейти к нужному действию.")
+    lines.append("\nОткройте карточку, и бот переведёт вас сразу к нужному экрану.")
     return "\n".join(lines)
 
 

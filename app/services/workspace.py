@@ -40,13 +40,13 @@ def resolve_notification_callback(notification: Notification) -> str:
 def resolve_notification_target_label(notification: Notification) -> str | None:
     """Human-friendly target label for inbox cards."""
     if notification.event_type == "discount.requested":
-        return "Открыть согласование"
+        return "Открыть скидку"
     if notification.entity_type == "estimate":
         return "Открыть смету"
     if notification.entity_type == "order":
         return "Открыть заказ"
     if notification.event_type.startswith("invite."):
-        return "Открыть модерацию"
+        return "Открыть модерацию мастеров"
     if notification.event_type.startswith("staffing."):
         return "Открыть кадровые действия"
     return None
@@ -221,8 +221,8 @@ async def get_action_items(
         for estimate in result.scalars().all():
             items.append({
                 "icon": "📩",
-                "title": f"Согласовать смету #{estimate.id}",
-                "body": "Откройте карточку и подтвердите или отклоните изменения.",
+                "title": f"Клиенту нужен ответ по смете #{estimate.id}",
+                "body": "Откройте смету, чтобы согласовать или отклонить изменения.",
                 "callback": f"est_view:{estimate.id}",
             })
 
@@ -240,7 +240,7 @@ async def get_action_items(
             items.append({
                 "icon": "🧰",
                 "title": f"Продолжить смету #{estimate.id}",
-                "body": "Вернитесь к сборке, отправке клиенту или обновлению объёма работ.",
+                "body": "Вернитесь к сборке, изменению позиций или отправке клиенту.",
                 "callback": f"est_view:{estimate.id}",
             })
 
@@ -259,7 +259,7 @@ async def get_action_items(
             items.append({
                 "icon": "💸",
                 "title": f"Согласовать скидку {request.discount_value}{suffix}",
-                "body": f"Смета #{request.estimate_id}. Причина: {request.reason}",
+                "body": f"Смета #{request.estimate_id}. Причина: {request.reason or 'не указана'}",
                 "callback": f"disc_detail:{request.id}",
             })
 
@@ -272,8 +272,8 @@ async def get_action_items(
         if invite_pending:
             items.append({
                 "icon": "📨",
-                "title": f"Модерация инвайтов: {invite_pending}",
-                "body": "Есть мастера, ожидающие подтверждения подключения.",
+                "title": f"На модерации мастеров: {invite_pending}",
+                "body": "Проверьте ожидающие подключения и примите решение.",
                 "callback": "inv_pending",
             })
 
@@ -286,7 +286,7 @@ async def get_action_items(
             items.append({
                 "icon": "👥",
                 "title": f"Кадровые действия: {staffing_pending}",
-                "body": "Есть кадровые решения, которые требуют подтверждения.",
+                "body": "Есть кадровые решения, которые требуют вашего подтверждения.",
                 "callback": "adm_staffing",
             })
 

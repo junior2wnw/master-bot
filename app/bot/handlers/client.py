@@ -2,13 +2,14 @@
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
 from app.bot.ui import paginate
-from app.models.catalog import ServiceItem
+from app.models.catalog import ServiceGroup, ServiceItem, ServiceSubgroup
 from app.services import catalog as catalog_svc
 
 router = Router()
@@ -57,10 +58,7 @@ async def cb_group(callback: CallbackQuery, session: AsyncSession) -> None:
 
     if subgroups:
         # Has subgroups — show them
-        groups = await catalog_svc.get_groups(session, profession_id=0)  # we need the group name
-        from sqlalchemy import select as sel
-        from app.models.catalog import ServiceGroup
-        grp_result = await session.execute(sel(ServiceGroup).where(ServiceGroup.id == group_id))
+        grp_result = await session.execute(select(ServiceGroup).where(ServiceGroup.id == group_id))
         grp = grp_result.scalar_one_or_none()
         grp_name = grp.name if grp else "Группа"
 
@@ -68,8 +66,6 @@ async def cb_group(callback: CallbackQuery, session: AsyncSession) -> None:
         kb_markup = keyboards.subgroups_list(subgroups, group_id)
         # Override back button with correct profession_id
         if grp:
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from aiogram.types import InlineKeyboardButton
             kb = InlineKeyboardBuilder()
             for s in subgroups:
                 count = f" ({s['count']})" if s.get("count") else ""
@@ -78,7 +74,7 @@ async def cb_group(callback: CallbackQuery, session: AsyncSession) -> None:
                     callback_data=f"sub:{s['id']}",
                 ))
             kb.row(InlineKeyboardButton(text="📋 Все работы группы", callback_data=f"grp_items:{group_id}:1"))
-            kb.row(InlineKeyboardButton(text=f"← Группы", callback_data=f"prof:{grp.profession_id}"))
+            kb.row(InlineKeyboardButton(text="← Группы", callback_data=f"prof:{grp.profession_id}"))
             kb_markup = kb.as_markup()
 
         await callback.message.edit_text(
@@ -113,7 +109,6 @@ async def cb_subgroup(callback: CallbackQuery, session: AsyncSession) -> None:
     page_items, total_pages, current = paginate(all_items, 1, PER_PAGE)
 
     # Get subgroup info for back navigation
-    from app.models.catalog import ServiceSubgroup
     sub_result = await session.execute(select(ServiceSubgroup).where(ServiceSubgroup.id == subgroup_id))
     sub = sub_result.scalar_one_or_none()
     back_cb = f"grp:{sub.group_id}" if sub else "catalog"
@@ -138,7 +133,6 @@ async def cb_subgroup_items_page(callback: CallbackQuery, session: AsyncSession)
     all_items = [{"id": it.id, "name": it.name, "price": it.price_recommended} for it in items]
     page_items, total_pages, current = paginate(all_items, page, PER_PAGE)
 
-    from app.models.catalog import ServiceSubgroup
     sub_result = await session.execute(select(ServiceSubgroup).where(ServiceSubgroup.id == subgroup_id))
     sub = sub_result.scalar_one_or_none()
     back_cb = f"grp:{sub.group_id}" if sub else "catalog"
@@ -232,14 +226,48 @@ async def cb_popular_page(callback: CallbackQuery, session: AsyncSession) -> Non
 @router.callback_query(F.data == "search")
 async def cb_search_prompt(callback: CallbackQuery, session: AsyncSession) -> None:
     """Prompt user to enter search query."""
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from aiogram.types import InlineKeyboardButton
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))
-
     await callback.message.edit_text(
         messages.search_prompt(),
-        reply_markup=kb.as_markup(),
+        reply_markup=keyboards.search_entry_actions(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("search_page:"))
+async def cb_search_page(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    """Paginate latest text search using query stored in FSM data."""
+    page = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    query = data.get("last_search_query")
+    if not query:
+        await callback.message.edit_text(
+            messages.search_prompt(),
+            reply_markup=keyboards.search_entry_actions(),
+        )
+        await callback.answer("Запрос не найден. Введите его заново.", show_alert=True)
+        return
+
+    items = await catalog_svc.search_items(session, query, limit=20)
+    if not items:
+        items = await catalog_svc.search_items_simple(session, query, limit=20)
+
+    all_items = [
+        {"id": it.id, "name": it.name, "price": it.price_recommended}
+        for it in items
+    ]
+    page_items, total_pages, current = paginate(all_items, page, PER_PAGE)
+
+    await callback.message.edit_text(
+        messages.search_results(
+            [{"name": it.name, "price_recommended": it.price_recommended} for it in items],
+            query,
+            total=len(items),
+        ),
+        reply_markup=keyboards.search_results(page_items, query, current, total_pages),
     )
     await callback.answer()
 
@@ -254,6 +282,7 @@ async def msg_search(message: Message, session: AsyncSession, state: FSMContext)
     query = message.text.strip()
     if len(query) < 2:
         return
+    await state.update_data(last_search_query=query)
 
     items = await catalog_svc.search_items(session, query, limit=20)
     if not items:
@@ -261,16 +290,9 @@ async def msg_search(message: Message, session: AsyncSession, state: FSMContext)
         items = await catalog_svc.search_items_simple(session, query, limit=20)
 
     if not items:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
-        kb = InlineKeyboardBuilder()
-        kb.row(
-            InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
-            InlineKeyboardButton(text="← Меню", callback_data="main_menu"),
-        )
         await message.answer(
             messages.search_results([], query),
-            reply_markup=kb.as_markup(),
+            reply_markup=keyboards.search_entry_actions(),
         )
         return
 
@@ -321,15 +343,7 @@ async def msg_voice(message: Message, session: AsyncSession) -> None:
             if result.summary:
                 text += f"{result.summary}\n\n"
             text += "💡 Попробуйте описать задачу подробнее или используйте каталог."
-
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from aiogram.types import InlineKeyboardButton
-            kb = InlineKeyboardBuilder()
-            kb.row(
-                InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
-                InlineKeyboardButton(text="🔍 Поиск", callback_data="search"),
-            )
-            await processing_msg.edit_text(text, reply_markup=kb.as_markup())
+            await processing_msg.edit_text(text, reply_markup=keyboards.search_entry_actions())
             return
 
         # Build response with detected items
@@ -353,8 +367,6 @@ async def msg_voice(message: Message, session: AsyncSession) -> None:
 
         text += f"\n🎯 Уверенность: {int(result.confidence * 100)}%"
 
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
         kb = InlineKeyboardBuilder()
         kb.row(
             InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),

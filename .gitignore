@@ -57,3 +57,4 @@ migrations/versions/__pycache__/
 
 # Excel source data (not part of the app)
 *.xlsx
+*.docx
