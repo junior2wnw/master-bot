@@ -143,14 +143,19 @@ async def notify_estimate_for_review(
 
 
 async def notify_new_master_pending(
-    session: AsyncSession, admin_id: int, master_name: str
+    session: AsyncSession,
+    admin_id: int,
+    master_name: str,
+    *,
+    activation_id: int | None = None,
 ) -> None:
     await notify(
         session,
         user_id=admin_id,
         event_type="invite.pending_approval",
         context={"master_name": master_name},
-        entity_type="invite",
+        entity_type="invite_activation",
+        entity_id=activation_id,
     )
 
 

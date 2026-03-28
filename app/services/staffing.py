@@ -10,6 +10,21 @@ from app.core.security import Role, can_manage_user, has_role
 from app.models.staffing import StaffingAction
 from app.models.user import User
 
+APPROVAL_REQUIRED_ACTIONS = frozenset({"terminate", "revoke_role"})
+STAFFING_STATUS_LABELS = {
+    "pending": "ожидает подтверждения",
+    "executed": "исполнено",
+    "rejected": "отклонено",
+}
+
+
+def staffing_requires_approval(initiator: User, action_type: str) -> bool:
+    return has_role(initiator, Role.SENIOR_MASTER) and action_type in APPROVAL_REQUIRED_ACTIONS
+
+
+def staffing_status_label(status: str) -> str:
+    return STAFFING_STATUS_LABELS.get(status, status)
+
 
 async def initiate_action(
     session: AsyncSession,
@@ -28,11 +43,7 @@ async def initiate_action(
     if not can_manage_user(initiator, target):
         raise PermissionDenied("Вы не можете управлять этим пользователем")
 
-    # Senior master needs admin approval for termination
-    needs_approval = (
-        has_role(initiator, Role.SENIOR_MASTER)
-        and action_type in ("terminate", "revoke_role")
-    )
+    needs_approval = staffing_requires_approval(initiator, action_type)
 
     status = "pending" if needs_approval else "executed"
 

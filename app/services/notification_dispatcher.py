@@ -12,7 +12,7 @@ import logging
 from datetime import UTC, datetime
 from string import Template
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import Event, event_bus
@@ -108,9 +108,18 @@ def _build_action_keyboard(notification: Notification):
             [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"order_pay:{eid}")],
         ]
     elif notification.event_type == "invite.pending_approval":
-        buttons = [
-            [InlineKeyboardButton(text="👥 Модерация", callback_data="inv_pending")],
-        ]
+        if eid:
+            buttons = [
+                [
+                    InlineKeyboardButton(text="✅ Одобрить", callback_data=f"inv_approve:{eid}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"inv_reject:{eid}"),
+                ],
+                [InlineKeyboardButton(text="👥 Открыть запрос", callback_data=f"inv_request:{eid}")],
+            ]
+        else:
+            buttons = [
+                [InlineKeyboardButton(text="👥 Модерация", callback_data="inv_pending")],
+            ]
     elif notification.event_type in ("discount.approved", "discount.rejected") and eid:
         buttons = [
             [InlineKeyboardButton(text="📊 Смета", callback_data=f"est_view:{eid}")],
@@ -220,7 +229,10 @@ async def _on_estimate_for_review(event: Event) -> None:
             select(User.id).join(User.roles).where(
                 User.is_active == True,  # noqa: E712
             ).filter(
-                User.roles.any(role_code=Role.ADMIN.value)
+                or_(
+                    User.roles.any(role_code=Role.ADMIN.value),
+                    User.roles.any(role_code=Role.PRODUCT_OWNER.value),
+                )
             )
         )
         admin_ids = list(result.scalars().all())

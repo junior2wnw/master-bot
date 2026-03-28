@@ -7,13 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, PermissionDenied
+from app.core.security import can_create_estimate, can_edit_estimate, can_respond_to_estimate, can_send_estimate_to_client
 from app.models.estimate import (
     Estimate,
     EstimateDiscount,
     EstimateLineItem,
     EstimateVersion,
 )
+from app.models.user import User
 
 
 async def create_estimate(
@@ -24,6 +26,13 @@ async def create_estimate(
     order_id: int | None = None,
 ) -> Estimate:
     """Create a new estimate with an empty first version."""
+    if master_id is not None:
+        master = (
+            await session.execute(select(User).where(User.id == master_id))
+        ).scalar_one_or_none()
+        if not master or not can_create_estimate(master):
+            raise PermissionDenied("Создавать сметы может только мастерский контур")
+
     estimate = Estimate(
         client_id=client_id,
         master_id=master_id,
@@ -202,10 +211,25 @@ async def update_estimate_status(
     new_status: str,
     user_id: int,
 ) -> Estimate:
+    actor = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not actor:
+        raise PermissionDenied("Пользователь не найден")
+
     result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
     estimate = result.scalar_one_or_none()
     if not estimate:
         raise NotFoundError("Смета")
+
+    if new_status == "client_review":
+        if not can_send_estimate_to_client(actor, estimate):
+            raise PermissionDenied("Недостаточно прав для отправки сметы клиенту")
+    elif new_status in {"approved", "draft"}:
+        if not can_respond_to_estimate(actor, estimate):
+            raise PermissionDenied("Недостаточно прав для ответа по смете")
+    elif not can_edit_estimate(actor, estimate):
+        raise PermissionDenied("Недостаточно прав для изменения статуса сметы")
 
     old_status = estimate.status
     estimate.status = new_status

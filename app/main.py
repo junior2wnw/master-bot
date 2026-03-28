@@ -75,7 +75,9 @@ def create_app() -> FastAPI:
                 await load_settings(session)
             except Exception:
                 # Tables may not exist yet on first run
-                pass
+                logging.getLogger(__name__).warning(
+                    "Startup preload skipped: flags/settings are not available yet",
+                )
 
     return app
 

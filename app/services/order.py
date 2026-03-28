@@ -16,7 +16,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
 from app.core.exceptions import ConflictError, NotFoundError, PermissionDenied, ValidationError
-from app.core.security import Role, has_role
+from app.core.security import (
+    Role,
+    can_assign_order,
+    can_cancel_order,
+    can_complete_order,
+    can_create_order_from_estimate,
+    can_pay_order,
+    can_start_order,
+    can_submit_order,
+    has_role,
+    has_permission_for_roles,
+    Permission,
+)
+from app.models.estimate import Estimate
 from app.models.order import Order, OrderStatusHistory
 from app.models.user import User
 
@@ -48,6 +61,25 @@ async def create_order(
     source_channel: str = "telegram",
 ) -> Order:
     """Create a new order."""
+    client = (
+        await session.execute(select(User).where(User.id == client_id))
+    ).scalar_one_or_none()
+    if not client:
+        raise NotFoundError("Пользователь")
+    if not has_permission_for_roles(client.role_codes, Permission.ORDER_CREATE):
+        raise PermissionDenied("У пользователя нет прав на создание заказа")
+
+    if estimate_id is not None:
+        estimate = (
+            await session.execute(select(Estimate).where(Estimate.id == estimate_id))
+        ).scalar_one_or_none()
+        if not estimate:
+            raise NotFoundError("Смета")
+        if estimate.status != "approved":
+            raise ValidationError("Заказ можно создать только по согласованной смете")
+        if not can_create_order_from_estimate(client, estimate):
+            raise PermissionDenied("Создавать заказ по смете может только ее клиент")
+
     order = Order(
         client_id=client_id,
         master_id=master_id,
@@ -98,6 +130,11 @@ async def transition_order(
 ) -> Order:
     """Transition order to a new status with validation."""
     order = await _get_order(session, order_id)
+    actor = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not actor:
+        raise PermissionDenied("Пользователь не найден")
     old_status = order.status
 
     # Validate transition
@@ -107,6 +144,19 @@ async def transition_order(
             f"Нельзя перейти из '{old_status}' в '{new_status}'. "
             f"Допустимые: {', '.join(allowed) if allowed else 'нет (терминальный статус)'}"
         )
+
+    if new_status == "submitted" and not can_submit_order(actor, order):
+        raise PermissionDenied("Недостаточно прав для отправки заказа")
+    if new_status == "assigned" and not can_assign_order(actor, order, master_id=order.master_id):
+        raise PermissionDenied("Недостаточно прав для назначения заказа")
+    if new_status == "in_progress" and not can_start_order(actor, order):
+        raise PermissionDenied("Недостаточно прав для начала работ")
+    if new_status == "completed" and not can_complete_order(actor, order):
+        raise PermissionDenied("Недостаточно прав для завершения заказа")
+    if new_status == "paid" and not can_pay_order(actor, order):
+        raise PermissionDenied("Недостаточно прав для подтверждения оплаты")
+    if new_status == "cancelled" and not can_cancel_order(actor, order):
+        raise PermissionDenied("Недостаточно прав для отмены заказа")
 
     # Cancellation requires a reason
     if new_status == "cancelled" and not reason:
@@ -150,9 +200,17 @@ async def assign_master(
 ) -> Order:
     """Assign a master to an order and transition to 'assigned'."""
     order = await _get_order(session, order_id)
+    actor = (
+        await session.execute(select(User).where(User.id == assigned_by))
+    ).scalar_one_or_none()
+    if not actor:
+        raise PermissionDenied("Пользователь не найден")
 
-    if order.status not in ("submitted", "draft"):
+    if order.status != "submitted":
         raise ConflictError(f"Заказ в статусе '{order.status}', нельзя назначить мастера")
+
+    if not can_assign_order(actor, order, master_id=master_id):
+        raise PermissionDenied("Недостаточно прав для назначения заказа")
 
     order.master_id = master_id
     await session.flush()

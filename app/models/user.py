@@ -17,6 +17,7 @@ class User(Base, TimestampMixin):
     first_name: Mapped[str] = mapped_column(String(100))
     last_name: Mapped[str | None] = mapped_column(String(100))
     username: Mapped[str | None] = mapped_column(String(100))
+    active_role_code: Mapped[str | None] = mapped_column(String(30))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     # Relationships

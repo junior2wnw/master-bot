@@ -6,10 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, verify_admin_token
+from app.core.security import highest_role_code
 from app.models.catalog import Profession, ServiceItem
 from app.models.coefficient import Coefficient
 from app.models.feature_flag import FeatureFlag
 from app.models.user import User, UserRole
+from app.services.catalog import create_service_item, update_item_prices
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(verify_admin_token)])
 
@@ -34,6 +36,7 @@ async def list_users(
             "telegram_id": u.telegram_id,
             "name": u.display_name,
             "roles": u.role_codes,
+            "primary_role": highest_role_code(u.role_codes),
             "is_active": u.is_active,
         }
         for u in users
@@ -59,7 +62,7 @@ async def list_items(
     if q:
         items = await search_items(session, q, profession_id=profession_id, limit=limit)
     else:
-        query = select(ServiceItem).where(ServiceItem.is_active == True).limit(limit)
+        query = select(ServiceItem).where(ServiceItem.is_active).limit(limit)
         if profession_id:
             query = query.where(ServiceItem.profession_id == profession_id)
         result = await session.execute(query)
@@ -92,15 +95,51 @@ async def update_price(item_id: int, body: PriceUpdate, session: AsyncSession = 
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Item not found")
-    if body.price_min is not None:
-        item.price_min = body.price_min
-    if body.price_max is not None:
-        item.price_max = body.price_max
-    if body.price_recommended is not None:
-        item.price_recommended = body.price_recommended
-    item.version += 1
+    await update_item_prices(
+        session,
+        item=item,
+        price_min=body.price_min,
+        price_recommended=body.price_recommended,
+        price_max=body.price_max,
+        actor_id=0,
+    )
     await session.commit()
     return {"ok": True, "id": item.id, "version": item.version}
+
+
+class CatalogItemCreate(BaseModel):
+    profession_id: int
+    group_id: int
+    subgroup_id: int | None = None
+    name: str
+    unit: str
+    price_min: int
+    price_recommended: int
+    price_max: int
+    aliases: str | None = None
+    hashtags: str | None = None
+    description: str | None = None
+
+
+@router.post("/catalog/items")
+async def create_item(body: CatalogItemCreate, session: AsyncSession = Depends(get_db)):
+    item = await create_service_item(
+        session,
+        profession_id=body.profession_id,
+        group_id=body.group_id,
+        subgroup_id=body.subgroup_id,
+        name=body.name,
+        unit=body.unit,
+        price_min=body.price_min,
+        price_recommended=body.price_recommended,
+        price_max=body.price_max,
+        actor_id=0,
+        aliases=body.aliases,
+        hashtags=body.hashtags,
+        description=body.description,
+    )
+    await session.commit()
+    return {"ok": True, "id": item.id, "code": item.code, "name": item.name}
 
 
 # === Coefficients ===

@@ -14,8 +14,8 @@ def _notification(**overrides):
     data = {
         "id": 7,
         "event_type": "discount.requested",
-        "title": "Скидка ждёт согласования",
-        "body": "Мастер запросил скидку",
+        "title": "Discount approval needed",
+        "body": "Master requested a discount",
         "status": "pending",
         "entity_type": "discount_request",
         "entity_id": 42,
@@ -39,6 +39,16 @@ def test_estimate_notification_routes_to_estimate_view():
     )
     assert resolve_notification_callback(notification) == "est_view:15"
     assert resolve_notification_target_label(notification) == "Открыть смету"
+
+
+def test_invite_pending_routes_to_request_card():
+    notification = _notification(
+        event_type="invite.pending_approval",
+        entity_type="invite_activation",
+        entity_id=11,
+    )
+    assert resolve_notification_callback(notification) == "inv_request:11"
+    assert resolve_notification_target_label(notification) == "Открыть запрос на роль"
 
 
 def test_notification_serialization_marks_unread_and_includes_action_target():

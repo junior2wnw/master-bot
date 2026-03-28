@@ -8,29 +8,57 @@ import hashlib
 import hmac
 import json
 import time
+from math import prod
 from urllib.parse import parse_qs, unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
 from app.config import get_settings
-from app.core.security import Role, has_role
-from app.models.catalog import Profession, ServiceGroup, ServiceItem, ServiceSubgroup, SharedOperation
+from app.core.security import (
+    Role,
+    can_create_estimate,
+    can_create_order_from_estimate,
+    can_edit_estimate,
+    can_request_discount_for_estimate,
+    can_respond_to_estimate,
+    can_send_estimate_to_client,
+    can_view_estimate,
+    can_view_order,
+    estimate_action_capabilities,
+    has_role,
+    order_action_capabilities,
+)
+from app.models.catalog import (
+    Profession,
+    ServiceGroup,
+    ServiceItem,
+    ServiceSubgroup,
+    SharedOperation,
+)
 from app.models.coefficient import Coefficient
-from app.models.discount import DiscountRequest
 from app.models.estimate import Estimate, EstimateLineItem, EstimateVersion
 from app.models.order import Order
 from app.models.payment import CommissionRecord, Payment
 from app.models.user import User, UserRole
 from app.services.auth import get_or_create_user, get_user_by_telegram_id
+from app.services.profile import (
+    get_profile_payload,
+    profile_payload_to_export_profile,
+    update_profile_fields,
+)
+from app.services.role_context import build_role_context_payload, set_active_role
 from app.services.workspace import (
     get_dashboard_data,
     list_notifications_for_user,
-    mark_notification_read as mark_workspace_notification_read,
     serialize_notification,
+)
+from app.services.workspace import (
+    mark_notification_read as mark_workspace_notification_read,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -87,7 +115,15 @@ class AuthResponse(BaseModel):
     telegram_id: int
     name: str
     roles: list[str]
+    direct_roles: list[str]
     is_active: bool
+    active_role: str | None
+    active_role_label: str
+    max_role: str | None
+    max_role_label: str
+    role_override: str | None
+    can_switch_role: bool
+    available_roles: list[dict]
 
 
 @router.post("/auth", response_model=AuthResponse)
@@ -117,12 +153,21 @@ async def auth_webapp(body: AuthRequest, session: AsyncSession = Depends(get_db)
         username=tg_user.get("username"),
     )
 
+    role_context = build_role_context_payload(user)
     return AuthResponse(
         user_id=user.id,
         telegram_id=user.telegram_id,
         name=user.display_name,
-        roles=user.role_codes,
+        roles=role_context["roles"],
+        direct_roles=role_context["direct_roles"],
         is_active=user.is_active,
+        active_role=role_context["active_role"],
+        active_role_label=role_context["active_role_label"],
+        max_role=role_context["max_role"],
+        max_role_label=role_context["max_role_label"],
+        role_override=role_context["role_override"],
+        can_switch_role=role_context["can_switch_role"],
+        available_roles=role_context["available_roles"],
     )
 
 
@@ -154,8 +199,8 @@ async def list_professions(session: AsyncSession = Depends(get_db)):
             Profession.id, Profession.code, Profession.name, Profession.icon,
             func.count(ServiceItem.id).label("count"),
         )
-        .outerjoin(ServiceItem, (ServiceItem.profession_id == Profession.id) & (ServiceItem.is_active == True))
-        .where(Profession.is_active == True)
+        .outerjoin(ServiceItem, (ServiceItem.profession_id == Profession.id) & ServiceItem.is_active)
+        .where(Profession.is_active)
         .group_by(Profession.id)
         .order_by(Profession.sort_priority)
     )
@@ -172,8 +217,8 @@ async def list_groups(profession_id: int, session: AsyncSession = Depends(get_db
             ServiceGroup.id, ServiceGroup.code, ServiceGroup.name,
             func.count(ServiceItem.id).label("count"),
         )
-        .outerjoin(ServiceItem, (ServiceItem.group_id == ServiceGroup.id) & (ServiceItem.is_active == True))
-        .where(ServiceGroup.profession_id == profession_id, ServiceGroup.is_active == True)
+        .outerjoin(ServiceItem, (ServiceItem.group_id == ServiceGroup.id) & ServiceItem.is_active)
+        .where(ServiceGroup.profession_id == profession_id, ServiceGroup.is_active)
         .group_by(ServiceGroup.id)
         .order_by(ServiceGroup.sort_priority)
     )
@@ -187,8 +232,8 @@ async def list_subgroups(group_id: int, session: AsyncSession = Depends(get_db))
             ServiceSubgroup.id, ServiceSubgroup.code, ServiceSubgroup.name,
             func.count(ServiceItem.id).label("count"),
         )
-        .outerjoin(ServiceItem, (ServiceItem.subgroup_id == ServiceSubgroup.id) & (ServiceItem.is_active == True))
-        .where(ServiceSubgroup.group_id == group_id, ServiceSubgroup.is_active == True)
+        .outerjoin(ServiceItem, (ServiceItem.subgroup_id == ServiceSubgroup.id) & ServiceItem.is_active)
+        .where(ServiceSubgroup.group_id == group_id, ServiceSubgroup.is_active)
         .group_by(ServiceSubgroup.id)
         .order_by(ServiceSubgroup.sort_priority)
     )
@@ -219,9 +264,9 @@ async def list_items(
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
 ):
-    q = select(ServiceItem).where(ServiceItem.is_active == True)
+    q = select(ServiceItem).where(ServiceItem.is_active)
     if popular:
-        q = q.where(ServiceItem.is_popular == True)
+        q = q.where(ServiceItem.is_popular)
     if subgroup_id:
         q = q.where(ServiceItem.subgroup_id == subgroup_id)
     elif group_id:
@@ -245,7 +290,7 @@ async def get_item(item_id: int, session: AsyncSession = Depends(get_db)):
 @router.get("/catalog/coefficients")
 async def list_coefficients(session: AsyncSession = Depends(get_db)):
     result = await session.execute(
-        select(Coefficient).where(Coefficient.is_active == True).order_by(Coefficient.coef_type)
+        select(Coefficient).where(Coefficient.is_active).order_by(Coefficient.coef_type)
     )
     return [
         {
@@ -259,7 +304,7 @@ async def list_coefficients(session: AsyncSession = Depends(get_db)):
 @router.get("/catalog/shared-ops")
 async def list_shared_ops(session: AsyncSession = Depends(get_db)):
     result = await session.execute(
-        select(SharedOperation).where(SharedOperation.is_active == True)
+        select(SharedOperation).where(SharedOperation.is_active)
     )
     return [
         {"id": o.id, "code": o.code, "name": o.name, "unit": o.typical_unit}
@@ -342,6 +387,8 @@ async def create_estimate_api(
     session: AsyncSession = Depends(get_db),
 ):
     from app.services.estimate import create_estimate
+    if not can_create_estimate(user):
+        raise HTTPException(403, "Access denied")
     est = await create_estimate(session, master_id=user.id)
     return {"id": est.id, "status": est.status}
 
@@ -371,10 +418,8 @@ async def add_estimate_item(
 ):
     from app.services.estimate import add_line_item
 
-    estimate = (await session.execute(
-        select(Estimate).where(Estimate.id == estimate_id)
-    )).scalar_one_or_none()
-    if not estimate or estimate.status != "draft":
+    estimate = await _require_estimate_edit(session, estimate_id, user)
+    if estimate.status != "draft":
         raise HTTPException(400, "Cannot modify this estimate")
 
     item = (await session.execute(
@@ -409,13 +454,13 @@ async def update_estimate_item(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    from math import prod
     from app.services.estimate import _recalculate_version
 
+    estimate = await _require_estimate_edit(session, estimate_id, user)
     item = (await session.execute(
         select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
     )).scalar_one_or_none()
-    if not item:
+    if not item or item.version_id != estimate.current_version_id:
         raise HTTPException(404, "Line item not found")
 
     if body.quantity is not None:
@@ -440,10 +485,11 @@ async def delete_estimate_item(
 ):
     from app.services.estimate import _recalculate_version
 
+    estimate = await _require_estimate_edit(session, estimate_id, user)
     item = (await session.execute(
         select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
     )).scalar_one_or_none()
-    if not item:
+    if not item or item.version_id != estimate.current_version_id:
         raise HTTPException(404, "Line item not found")
 
     version_id = item.version_id
@@ -466,20 +512,24 @@ async def update_estimate_status_api(
     session: AsyncSession = Depends(get_db),
 ):
     from app.services.estimate import update_estimate_status
+    estimate = await _load_estimate_entity(session, estimate_id)
 
     # If linking client
     if body.client_telegram_id:
+        if not can_send_estimate_to_client(user, estimate):
+            raise HTTPException(403, "Access denied")
         client = await get_user_by_telegram_id(session, body.client_telegram_id)
         if not client:
             client, _ = await get_or_create_user(
                 session, telegram_id=body.client_telegram_id, first_name="Клиент",
             )
-        est = (await session.execute(
-            select(Estimate).where(Estimate.id == estimate_id)
-        )).scalar_one_or_none()
-        if est:
-            est.client_id = client.id
-            await session.flush()
+        estimate.client_id = client.id
+        await session.flush()
+
+    if body.status == "client_review" and not can_send_estimate_to_client(user, estimate):
+        raise HTTPException(403, "Access denied")
+    if body.status in {"approved", "draft"} and not can_respond_to_estimate(user, estimate):
+        raise HTTPException(403, "Access denied")
 
     est = await update_estimate_status(
         session, estimate_id=estimate_id, new_status=body.status, user_id=user.id,
@@ -511,6 +561,9 @@ async def request_discount(
     session: AsyncSession = Depends(get_db),
 ):
     from app.services.discount import create_discount_request
+    estimate = await _require_estimate_view(session, estimate_id, user)
+    if not can_request_discount_for_estimate(user, estimate):
+        raise HTTPException(403, "Access denied")
 
     dr = await create_discount_request(
         session,
@@ -531,20 +584,16 @@ async def list_orders(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    q = (
-        select(Order)
-        .where((Order.master_id == user.id) | (Order.client_id == user.id))
-        .order_by(Order.created_at.desc())
-        .limit(50)
-    )
-    result = await session.execute(q)
+    from app.services.order import get_orders_for_user
+
+    orders = await get_orders_for_user(session, user, limit=50)
     return [
         {
             "id": o.id, "status": o.status, "address": o.address,
             "urgency": o.urgency, "estimate_id": o.estimate_id,
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }
-        for o in result.scalars()
+        for o in orders
     ]
 
 
@@ -562,6 +611,9 @@ async def create_order(
     session: AsyncSession = Depends(get_db),
 ):
     from app.services.order import create_order as svc_create
+    estimate = await _require_estimate_view(session, body.estimate_id, user)
+    if not can_create_order_from_estimate(user, estimate):
+        raise HTTPException(403, "Access denied")
     order = await svc_create(
         session,
         client_id=user.id,
@@ -579,18 +631,12 @@ async def get_order(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    order = (await session.execute(
-        select(Order).where(Order.id == order_id)
-    )).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, "Order not found")
+    order = await _require_order_view(session, order_id, user)
 
     # Estimate info
     estimate_data = None
     if order.estimate_id:
-        est = (await session.execute(
-            select(Estimate).where(Estimate.id == order.estimate_id)
-        )).scalar_one_or_none()
+        est = await _load_estimate_entity(session, order.estimate_id)
         if est and est.current_version_id:
             ver = (await session.execute(
                 select(EstimateVersion).where(EstimateVersion.id == est.current_version_id)
@@ -605,7 +651,7 @@ async def get_order(
                     "total": ver.total_amount,
                     "final": ver.final_amount,
                     "items": [
-                        {"name": li.service_item_name, "quantity": li.quantity,
+                        {"name": li.name, "quantity": li.quantity,
                          "unit_price": li.unit_price, "subtotal": li.subtotal}
                         for li in items
                     ],
@@ -628,6 +674,8 @@ async def get_order(
     return {
         "id": order.id,
         "status": order.status,
+        "client_id": order.client_id,
+        "master_id": order.master_id,
         "address": order.address,
         "urgency": order.urgency,
         "notes": order.notes,
@@ -636,6 +684,7 @@ async def get_order(
         "estimate": estimate_data,
         "payment_status": payment.status if payment else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
+        "capabilities": order_action_capabilities(user, order),
         "history": [
             {"from": h.from_status, "to": h.to_status,
              "at": h.created_at.isoformat() if h.created_at else None}
@@ -664,6 +713,23 @@ async def update_order_status(
     return {"id": order.id, "status": order.status}
 
 
+@router.post("/orders/{order_id}/assign-self")
+async def assign_order_to_self(
+    order_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.services.order import assign_master
+
+    order = await assign_master(
+        session,
+        order_id=order_id,
+        master_id=user.id,
+        assigned_by=user.id,
+    )
+    return {"id": order.id, "status": order.status, "master_id": order.master_id}
+
+
 @router.get("/orders/{order_id}/payment")
 async def get_payment_info(
     order_id: int,
@@ -671,11 +737,7 @@ async def get_payment_info(
     session: AsyncSession = Depends(get_db),
 ):
     settings = get_settings()
-    order = (await session.execute(
-        select(Order).where(Order.id == order_id)
-    )).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, "Order not found")
+    order = await _require_order_view(session, order_id, user)
 
     # Get estimate total
     est = None
@@ -704,7 +766,7 @@ async def get_payment_info(
         "bank_name": settings.payment_bank_name,
         "recipient": settings.payment_recipient_name,
         "payment_status": payment.status if payment else "pending",
-        "qr_data": f"ST00012|Name={settings.payment_recipient_name}|PersonalAcc={settings.payment_phone}|Sum={amount}00" if amount else None,
+        "qr_data": None,
     }
 
 
@@ -751,6 +813,9 @@ async def get_earnings(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
+    if not can_create_estimate(user):
+        raise HTTPException(403, "Access denied")
+
     completed = (await session.execute(
         select(func.count(Order.id))
         .where(Order.master_id == user.id, Order.status.in_(["completed", "paid"]))
@@ -789,11 +854,9 @@ async def list_approvals(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    result = await session.execute(
-        select(DiscountRequest)
-        .where(DiscountRequest.assigned_to == user.id, DiscountRequest.status == "pending")
-        .order_by(DiscountRequest.created_at.desc())
-    )
+    from app.services.discount import get_pending_for_approver
+
+    requests = await get_pending_for_approver(session, user)
     return [
         {
             "id": dr.id,
@@ -804,7 +867,7 @@ async def list_approvals(
             "status": dr.status,
             "created_at": dr.created_at.isoformat() if dr.created_at else None,
         }
-        for dr in result.scalars()
+        for dr in requests
     ]
 
 
@@ -938,76 +1001,12 @@ async def get_payment_qr(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    """Generate QR code for payment (returns SVG or base64 PNG)."""
-    settings = get_settings()
-
-    order = (await session.execute(
-        select(Order).where(Order.id == order_id)
-    )).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, "Order not found")
-
-    # Get amount from estimate
-    amount = 0
-    if order.estimate_id:
-        est = (await session.execute(
-            select(Estimate).where(Estimate.id == order.estimate_id)
-        )).scalar_one_or_none()
-        if est and est.current_version_id:
-            ver = (await session.execute(
-                select(EstimateVersion).where(EstimateVersion.id == est.current_version_id)
-            )).scalar_one_or_none()
-            if ver:
-                amount = ver.final_amount
-
-    if not amount:
-        raise HTTPException(400, "No amount to pay")
-
-    # Generate QR data (Russian banking QR standard ST-00012)
-    qr_data = (
-        f"ST00012|"
-        f"Name={settings.payment_recipient_name}|"
-        f"PersonalAcc={settings.payment_phone}|"
-        f"BankName={settings.payment_bank_name}|"
-        f"Sum={amount}00|"
-        f"Purpose=Оплата заказа {order_id}"
+    """Order-level bank QR is not available from partial global settings."""
+    await _require_order_view(session, order_id, user)
+    raise HTTPException(
+        400,
+        "Банковский QR для заказа не настроен: используйте QR из сметы или реквизиты мастера",
     )
-
-    # Generate QR code as base64 PNG
-    try:
-        import qrcode
-        import base64
-        from io import BytesIO
-
-        qr = qrcode.QRCode(version=1, box_size=8, border=2)
-        qr.add_data(qr_data)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        qr_base64 = base64.b64encode(buf.getvalue()).decode()
-
-        return {
-            "order_id": order_id,
-            "amount": amount,
-            "qr_data": qr_data,
-            "qr_image": f"data:image/png;base64,{qr_base64}",
-            "phone": settings.payment_phone,
-            "recipient": settings.payment_recipient_name,
-            "bank": settings.payment_bank_name,
-        }
-    except ImportError:
-        # qrcode library not installed — return data only
-        return {
-            "order_id": order_id,
-            "amount": amount,
-            "qr_data": qr_data,
-            "qr_image": None,
-            "phone": settings.payment_phone,
-            "recipient": settings.payment_recipient_name,
-            "bank": settings.payment_bank_name,
-        }
 
 
 # ─── Master Profile ──────────────────────────────────────────
@@ -1030,46 +1029,50 @@ class ProfileUpdate(BaseModel):
     payment_recipient: str | None = None
 
 
+class RoleContextUpdate(BaseModel):
+    role_code: str | None = None
+
+
 @router.get("/profile")
 async def get_profile(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    from app.models.master_profile import MasterProfile
-    profile = (await session.execute(
-        select(MasterProfile).where(MasterProfile.user_id == user.id)
-    )).scalar_one_or_none()
-
-    if not profile:
-        return {
-            "user_id": user.id,
-            "full_name": user.display_name,
-            "phone": user.phone or "",
-            "telegram_username": user.username or "",
-            "email": "", "company_name": "", "inn": "", "address": "",
-            "specialization": "", "bank_name": "", "bik": "",
-            "correspondent_account": "", "settlement_account": "",
-            "card_number": "", "sbp_phone": "", "payment_recipient": "",
-        }
-
     return {
-        "user_id": user.id,
-        "full_name": profile.full_name or user.display_name,
-        "phone": profile.phone or user.phone or "",
-        "email": profile.email or "",
-        "telegram_username": profile.telegram_username or user.username or "",
-        "company_name": profile.company_name or "",
-        "inn": profile.inn or "",
-        "address": profile.address or "",
-        "specialization": profile.specialization or "",
-        "bank_name": profile.bank_name or "",
-        "bik": profile.bik or "",
-        "correspondent_account": profile.correspondent_account or "",
-        "settlement_account": profile.settlement_account or "",
-        "card_number": profile.card_number or "",
-        "sbp_phone": profile.sbp_phone or "",
-        "payment_recipient": profile.payment_recipient or "",
+        **(await get_profile_payload(session, user)),
+        **build_role_context_payload(user),
     }
+
+
+@router.get("/profile/role-mode")
+async def get_profile_role_mode(user: User = Depends(get_current_user)):
+    return build_role_context_payload(user)
+
+
+@router.put("/profile/role-mode")
+async def update_profile_role_mode(
+    body: RoleContextUpdate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    return await set_active_role(
+        session,
+        user=user,
+        role_code=body.role_code,
+        changed_by=user.id,
+    )
+
+
+@router.get("/profile/payment-qr")
+async def get_profile_payment_qr(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.services.estimate_export import generate_payment_qr
+
+    profile = await get_profile_payload(session, user)
+    export_profile = profile_payload_to_export_profile(profile)
+    return generate_payment_qr(export_profile, purpose="Оплата услуг")
 
 
 @router.put("/profile")
@@ -1078,19 +1081,7 @@ async def update_profile(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    from app.models.master_profile import MasterProfile
-    profile = (await session.execute(
-        select(MasterProfile).where(MasterProfile.user_id == user.id)
-    )).scalar_one_or_none()
-
-    if not profile:
-        profile = MasterProfile(user_id=user.id)
-        session.add(profile)
-
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(profile, field, value)
-
-    await session.flush()
+    await update_profile_fields(session, user, **body.model_dump(exclude_unset=True))
     return {"ok": True}
 
 
@@ -1098,14 +1089,9 @@ async def update_profile(
 
 async def _get_export_data(session, estimate_id: int, user):
     """Load estimate + profile data for export."""
-    from app.models.master_profile import MasterProfile
-    from app.services.estimate_export import ExportEstimate, ExportLineItem, ExportProfile
+    from app.services.estimate_export import ExportEstimate, ExportLineItem
 
-    estimate = (await session.execute(
-        select(Estimate).where(Estimate.id == estimate_id)
-    )).scalar_one_or_none()
-    if not estimate:
-        raise HTTPException(404, "Estimate not found")
+    estimate = await _require_estimate_view(session, estimate_id, user)
 
     # Load version + items
     ver = None
@@ -1134,9 +1120,7 @@ async def _get_export_data(session, estimate_id: int, user):
     # Client name
     client_name = ""
     if estimate.client_id:
-        client = (await session.execute(
-            select(User).where(User.id == estimate.client_id)
-        )).scalar_one_or_none()
+        client = await session.get(User, estimate.client_id)
         if client:
             client_name = client.display_name
 
@@ -1168,31 +1152,9 @@ async def _get_export_data(session, estimate_id: int, user):
 
     # Load master profile
     master_id = estimate.master_id or user.id
-    mp = (await session.execute(
-        select(MasterProfile).where(MasterProfile.user_id == master_id)
-    )).scalar_one_or_none()
-
-    master_user = (await session.execute(
-        select(User).where(User.id == master_id)
-    )).scalar_one_or_none()
-
-    export_profile = ExportProfile(
-        full_name=mp.full_name if mp and mp.full_name else (master_user.display_name if master_user else ""),
-        phone=mp.phone if mp and mp.phone else (master_user.phone if master_user else ""),
-        email=mp.email if mp else "",
-        telegram_username=mp.telegram_username if mp and mp.telegram_username else (master_user.username if master_user else ""),
-        company_name=mp.company_name if mp else "",
-        inn=mp.inn if mp else "",
-        address=mp.address if mp else "",
-        specialization=mp.specialization if mp else "",
-        bank_name=mp.bank_name if mp else "",
-        bik=mp.bik if mp else "",
-        correspondent_account=mp.correspondent_account if mp else "",
-        settlement_account=mp.settlement_account if mp else "",
-        card_number=mp.card_number if mp else "",
-        sbp_phone=mp.sbp_phone if mp else "",
-        payment_recipient=mp.payment_recipient if mp else "",
-    )
+    master_user = await session.get(User, master_id)
+    master_profile = await get_profile_payload(session, master_user) if master_user else {}
+    export_profile = profile_payload_to_export_profile(master_profile)
 
     return export_est, export_profile
 
@@ -1203,7 +1165,6 @@ async def export_estimate_pdf(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import Response
     from app.services.estimate_export import export_pdf
 
     export_est, export_profile = await _get_export_data(session, estimate_id, user)
@@ -1224,7 +1185,6 @@ async def export_estimate_xlsx(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import Response
     from app.services.estimate_export import export_xlsx
 
     export_est, export_profile = await _get_export_data(session, estimate_id, user)
@@ -1251,28 +1211,60 @@ async def get_estimate_qr(
     from app.services.estimate_export import generate_payment_qr
 
     export_est, export_profile = await _get_export_data(session, estimate_id, user)
-
-    if not export_profile.bank_name and not export_profile.sbp_phone and not export_profile.card_number:
-        raise HTTPException(400, "Банковские реквизиты мастера не заполнены")
-
-    return generate_payment_qr(export_profile, export_est.final, estimate_id)
+    qr_payload = generate_payment_qr(export_profile, export_est.final, estimate_id)
+    if not qr_payload["has_bank_qr"]:
+        missing = ", ".join(qr_payload["missing_bank_fields"])
+        raise HTTPException(400, f"Для банковского QR заполните: {missing}")
+    return qr_payload
 
 
 # ─── Helpers ─────────────────────────────────────────────────
 
-async def _load_estimate(session: AsyncSession, estimate_id: int, user: User) -> dict:
-    """Load full estimate data for API response."""
-    estimate = (await session.execute(
-        select(Estimate).where(Estimate.id == estimate_id)
-    )).scalar_one_or_none()
+async def _load_estimate_entity(session: AsyncSession, estimate_id: int) -> Estimate:
+    estimate = await session.get(Estimate, estimate_id)
     if not estimate:
         raise HTTPException(404, "Estimate not found")
+    return estimate
+
+
+async def _require_estimate_view(session: AsyncSession, estimate_id: int, user: User) -> Estimate:
+    estimate = await _load_estimate_entity(session, estimate_id)
+    if not can_view_estimate(user, estimate):
+        raise HTTPException(403, "Access denied")
+    return estimate
+
+
+async def _require_estimate_edit(session: AsyncSession, estimate_id: int, user: User) -> Estimate:
+    estimate = await _load_estimate_entity(session, estimate_id)
+    if not can_edit_estimate(user, estimate):
+        raise HTTPException(403, "Access denied")
+    return estimate
+
+
+async def _load_order_entity(session: AsyncSession, order_id: int) -> Order:
+    order = await session.get(Order, order_id)
+    if not order:
+        raise HTTPException(404, "Order not found")
+    return order
+
+
+async def _require_order_view(session: AsyncSession, order_id: int, user: User) -> Order:
+    order = await _load_order_entity(session, order_id)
+    if not can_view_order(user, order):
+        raise HTTPException(403, "Access denied")
+    return order
+
+
+async def _load_estimate(session: AsyncSession, estimate_id: int, user: User) -> dict:
+    """Load full estimate data for API response."""
+    estimate = await _require_estimate_view(session, estimate_id, user)
 
     result = {
         "id": estimate.id,
         "status": estimate.status,
         "client_id": estimate.client_id,
         "master_id": estimate.master_id,
+        "capabilities": estimate_action_capabilities(user, estimate),
         "items": [],
         "version": 1,
         "total": 0,

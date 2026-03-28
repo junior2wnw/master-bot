@@ -9,8 +9,18 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
-from app.bot.ui import money, paginate
-from app.core.security import Role, has_role
+from app.bot.ui import fit_button_text, money, paginate
+from app.core.security import (
+    Permission,
+    can_create_order_from_estimate,
+    can_edit_estimate,
+    can_request_discount_for_estimate,
+    can_respond_to_estimate,
+    can_send_estimate_to_client,
+    can_view_estimate,
+    estimate_action_capabilities,
+    has_permission,
+)
 from app.models.catalog import ServiceItem
 from app.models.estimate import Estimate, EstimateLineItem, EstimateVersion
 from app.models.order import Order
@@ -33,10 +43,7 @@ def _can_access_estimates(user) -> bool:
     """Owner, admin, senior_master and master can all access estimates."""
     if not user:
         return False
-    return any(
-        has_role(user, r)
-        for r in (Role.PRODUCT_OWNER, Role.ADMIN, Role.SENIOR_MASTER, Role.MASTER)
-    )
+    return has_permission(user, Permission.ESTIMATE_CREATE)
 
 
 class EstimateStates(StatesGroup):
@@ -44,6 +51,44 @@ class EstimateStates(StatesGroup):
     setting_quantity = State()
     discount_reason = State()
     client_link = State()
+
+
+async def _get_estimate(session: AsyncSession, estimate_id: int) -> Estimate | None:
+    return (
+        await session.execute(select(Estimate).where(Estimate.id == estimate_id))
+    ).scalar_one_or_none()
+
+
+async def _get_estimate_for_view(session: AsyncSession, user, estimate_id: int) -> Estimate | None:
+    estimate = await _get_estimate(session, estimate_id)
+    if not estimate or not can_view_estimate(user, estimate):
+        return None
+    return estimate
+
+
+async def _get_estimate_for_edit(session: AsyncSession, user, estimate_id: int) -> Estimate | None:
+    estimate = await _get_estimate(session, estimate_id)
+    if not estimate or not can_edit_estimate(user, estimate):
+        return None
+    return estimate
+
+
+async def _get_estimate_item_for_edit(
+    session: AsyncSession,
+    user,
+    estimate_id: int,
+    line_item_id: int,
+) -> tuple[Estimate | None, EstimateLineItem | None]:
+    item = (
+        await session.execute(select(EstimateLineItem).where(EstimateLineItem.id == line_item_id))
+    ).scalar_one_or_none()
+    if not item:
+        return None, None
+
+    estimate = await _get_estimate_for_edit(session, user, estimate_id)
+    if not estimate or estimate.current_version_id != item.version_id:
+        return None, None
+    return estimate, item
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -113,7 +158,7 @@ async def cb_my_estimates(callback: CallbackQuery, session: AsyncSession) -> Non
 async def cb_estimates_page(callback: CallbackQuery, session: AsyncSession) -> None:
     page = int(callback.data.split(":")[1])
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user:
+    if not _can_access_estimates(user):
         return
     await _show_estimates_list(callback, session, user, page)
     await callback.answer()
@@ -160,7 +205,8 @@ async def _show_estimates_list(callback, session, user, page):
 @router.callback_query(F.data == "est_new")
 async def cb_new_estimate(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user:
+    if not _can_access_estimates(user):
+        await callback.answer("Доступно только мастерам", show_alert=True)
         return
 
     estimate = await create_estimate(session, master_id=user.id)
@@ -184,18 +230,22 @@ async def cb_view_estimate(
     state: FSMContext,
 ) -> None:
     estimate_id = int(callback.data.split(":")[1])
-    est_data = await _load_estimate_data(session, estimate_id)
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate_for_view(session, user, estimate_id)
+    est_data = await _load_estimate_data(session, estimate_id) if estimate else None
     if not est_data:
         await callback.answer("Смета не найдена", show_alert=True)
         return
 
-    user = await get_user_by_telegram_id(session, callback.from_user.id)
-    is_master = _can_access_estimates(user)
     await state.update_data(active_estimate_id=estimate_id)
 
     await callback.message.edit_text(
         messages.estimate_summary(est_data),
-        reply_markup=keyboards.estimate_actions(estimate_id, is_master=is_master, status=est_data["status"]),
+        reply_markup=keyboards.estimate_actions(
+            estimate_id,
+            status=est_data["status"],
+            capabilities=estimate_action_capabilities(user, estimate),
+        ),
     )
     await callback.answer()
 
@@ -208,6 +258,10 @@ async def cb_estimate_items(
 ) -> None:
     parts = callback.data.split(":")
     estimate_id, page = int(parts[1]), int(parts[2])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not await _get_estimate_for_edit(session, user, estimate_id):
+        await callback.answer("Смета не найдена", show_alert=True)
+        return
     await state.update_data(active_estimate_id=estimate_id)
     await _show_estimate_items_editor(callback, session, estimate_id, page=page)
     await callback.answer()
@@ -220,10 +274,8 @@ async def cb_estimate_item_editor(
 ) -> None:
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
-    result = await session.execute(
-        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
-    )
-    item = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    _, item = await _get_estimate_item_for_edit(session, user, estimate_id, line_item_id)
     if not item:
         await callback.answer("Позиция не найдена", show_alert=True)
         return
@@ -269,14 +321,7 @@ async def cb_add_to_estimate(
     estimate = None
 
     if active_estimate_id:
-        result = await session.execute(
-            select(Estimate).where(
-                Estimate.id == active_estimate_id,
-                Estimate.master_id == user.id,
-                Estimate.status == "draft",
-            )
-        )
-        estimate = result.scalar_one_or_none()
+        estimate = await _get_estimate_for_edit(session, user, active_estimate_id)
 
     if not estimate:
         result = await session.execute(
@@ -306,7 +351,11 @@ async def cb_add_to_estimate(
     est_data = await _load_estimate_data(session, estimate.id)
     await callback.message.edit_text(
         messages.estimate_summary(est_data),
-        reply_markup=keyboards.estimate_actions(estimate.id, is_master=True, status="draft"),
+        reply_markup=keyboards.estimate_actions(
+            estimate.id,
+            status="draft",
+            capabilities=estimate_action_capabilities(user, estimate),
+        ),
     )
 
 
@@ -319,6 +368,11 @@ async def cb_item_increment(callback: CallbackQuery, session: AsyncSession) -> N
     """Increase line item quantity by 1."""
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    _, item = await _get_estimate_item_for_edit(session, user, estimate_id, line_item_id)
+    if not item:
+        await callback.answer("Позиция не найдена", show_alert=True)
+        return
     await _adjust_quantity(session, line_item_id, delta=1)
     await _show_estimate_item_editor(callback, session, estimate_id, line_item_id)
     await callback.answer()
@@ -329,6 +383,11 @@ async def cb_item_decrement(callback: CallbackQuery, session: AsyncSession) -> N
     """Decrease line item quantity by 1 (min 1)."""
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    _, item = await _get_estimate_item_for_edit(session, user, estimate_id, line_item_id)
+    if not item:
+        await callback.answer("Позиция не найдена", show_alert=True)
+        return
     await _adjust_quantity(session, line_item_id, delta=-1)
     await _show_estimate_item_editor(callback, session, estimate_id, line_item_id)
     await callback.answer()
@@ -340,10 +399,8 @@ async def cb_item_delete(callback: CallbackQuery, session: AsyncSession) -> None
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
 
-    result = await session.execute(
-        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
-    )
-    item = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    _, item = await _get_estimate_item_for_edit(session, user, estimate_id, line_item_id)
     if item:
         await session.delete(item)
         await session.flush()
@@ -363,10 +420,8 @@ async def cb_item_set_quantity(
 ) -> None:
     parts = callback.data.split(":")
     estimate_id, line_item_id = int(parts[1]), int(parts[2])
-    result = await session.execute(
-        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
-    )
-    item = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    _, item = await _get_estimate_item_for_edit(session, user, estimate_id, line_item_id)
     if not item:
         await callback.answer("Позиция не найдена", show_alert=True)
         return
@@ -428,8 +483,8 @@ async def cb_clear_estimate(callback: CallbackQuery, session: AsyncSession) -> N
     """Clear all items from estimate."""
     estimate_id = int(callback.data.split(":")[1])
 
-    result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
-    estimate = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate_for_edit(session, user, estimate_id)
     if not estimate or not estimate.current_version_id:
         await callback.answer("Смета не найдена", show_alert=True)
         return
@@ -492,9 +547,8 @@ async def msg_estimate_search(message: Message, state: FSMContext, session: Asyn
     kb = InlineKeyboardBuilder()
     for it in items:
         price = f" · {it.price_recommended:,}₽" if it.price_recommended else ""
-        name = it.name[:28] + "…" if len(it.name) > 30 else it.name
         kb.row(InlineKeyboardButton(
-            text=f"➕ {name}{price}",
+            text=fit_button_text(f"➕ {it.name}", max_len=32, suffix=price),
             callback_data=f"add_to_est:{it.id}",
         ))
     if estimate_id:
@@ -527,15 +581,18 @@ async def cb_send_to_client(callback: CallbackQuery, state: FSMContext, session:
     """Send estimate to client for review."""
     estimate_id = int(callback.data.split(":")[1])
 
-    result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
-    estimate = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate(session, estimate_id)
     if not estimate:
         await callback.answer("Смета не найдена", show_alert=True)
         return
 
+    if not can_send_estimate_to_client(user, estimate):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
     if estimate.client_id:
         # Client is already linked — send for review
-        user = await get_user_by_telegram_id(session, callback.from_user.id)
         await update_estimate_status(
             session, estimate_id=estimate_id, new_status="client_review", user_id=user.id,
         )
@@ -592,8 +649,8 @@ async def msg_client_link(message: Message, state: FSMContext, session: AsyncSes
     )
 
     # Update estimate
-    result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
-    estimate = result.scalar_one_or_none()
+    actor = await get_user_by_telegram_id(session, message.from_user.id)
+    estimate = await _get_estimate_for_edit(session, actor, estimate_id)
     if estimate:
         estimate.client_id = client.id
         await session.flush()
@@ -612,6 +669,10 @@ async def cb_approve_estimate(callback: CallbackQuery, session: AsyncSession) ->
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
         return
+    estimate = await _get_estimate(session, estimate_id)
+    if not estimate or not can_respond_to_estimate(user, estimate):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
 
     await update_estimate_status(
         session, estimate_id=estimate_id, new_status="approved", user_id=user.id,
@@ -626,6 +687,10 @@ async def cb_reject_estimate(callback: CallbackQuery, session: AsyncSession) -> 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
         return
+    estimate = await _get_estimate(session, estimate_id)
+    if not estimate or not can_respond_to_estimate(user, estimate):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
 
     await update_estimate_status(
         session, estimate_id=estimate_id, new_status="draft", user_id=user.id,
@@ -639,8 +704,13 @@ async def cb_reject_estimate(callback: CallbackQuery, session: AsyncSession) -> 
 # ═══════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("est_discount:"))
-async def cb_request_discount(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_request_discount(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     estimate_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate(session, estimate_id)
+    if not estimate or not can_request_discount_for_estimate(user, estimate):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
     await state.update_data(discount_estimate_id=estimate_id)
     await state.set_state(EstimateStates.discount_reason)
 
@@ -770,6 +840,11 @@ async def _show_estimate_items_editor(
     *,
     page: int,
 ) -> None:
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate_for_edit(session, user, estimate_id)
+    if not estimate:
+        return
+
     est_data = await _load_estimate_data(session, estimate_id)
     if not est_data:
         await callback.answer("Смета не найдена", show_alert=True)
@@ -801,10 +876,8 @@ async def _show_estimate_item_editor(
     estimate_id: int,
     line_item_id: int,
 ) -> None:
-    result = await session.execute(
-        select(EstimateLineItem).where(EstimateLineItem.id == line_item_id)
-    )
-    item = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    item = await _get_estimate_item_for_edit(session, user, estimate_id, line_item_id)
     if not item:
         await _show_estimate_items_editor(callback, session, estimate_id, page=1)
         return
@@ -828,11 +901,17 @@ async def _refresh_estimate_view(callback: CallbackQuery, session: AsyncSession,
         return
 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
-    is_master = _can_access_estimates(user)
+    estimate = await _get_estimate_for_view(session, user, estimate_id)
+    if not estimate:
+        return
 
     await callback.message.edit_text(
         messages.estimate_summary(est_data),
-        reply_markup=keyboards.estimate_actions(estimate_id, is_master=is_master, status=est_data["status"]),
+        reply_markup=keyboards.estimate_actions(
+            estimate_id,
+            status=est_data["status"],
+            capabilities=estimate_action_capabilities(user, estimate),
+        ),
     )
 
 
@@ -900,20 +979,16 @@ async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None
 
     try:
         export_est, export_profile = await _build_export_data(session, estimate_id, user)
-        from app.services.estimate_export import (
-            _build_qr_payload,
-            _generate_qr_image,
-        )
+        from app.services.estimate_export import generate_payment_qr
 
-        if not export_profile.bank_name and not export_profile.sbp_phone and not export_profile.card_number:
+        qr = generate_payment_qr(export_profile, export_est.final, estimate_id)
+        if not qr["has_bank_qr"]:
+            missing = ", ".join(qr["missing_bank_fields"])
             await callback.message.answer(
-                "⚠️ Банковские реквизиты не заполнены.\n"
-                "Заполните их в профиле (Ещё → Личные данные и реквизиты)."
+                "⚠️ Для банковского QR заполните реквизиты в профиле.\n"
+                f"Не хватает: {missing}"
             )
             return
-
-        qr_payload = _build_qr_payload(export_profile, export_est.final, estimate_id)
-        qr_bytes = _generate_qr_image(qr_payload, size=300)
 
         # Build payment text
         from app.bot.ui import money as fmt_money
@@ -937,9 +1012,11 @@ async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None
 
         text = "\n".join(lines)
 
-        if qr_bytes:
+        if qr.get("qr_image"):
             from aiogram.types import BufferedInputFile
-            photo = BufferedInputFile(qr_bytes, filename="qr.png")
+            import base64
+
+            photo = BufferedInputFile(base64.b64decode(qr["qr_image"]), filename="qr.png")
             await callback.message.answer_photo(photo, caption=text)
         else:
             await callback.message.answer(text)
@@ -953,11 +1030,9 @@ async def _build_export_data(session: AsyncSession, estimate_id: int, user):
     from app.models.master_profile import MasterProfile
     from app.services.estimate_export import ExportEstimate, ExportLineItem, ExportProfile
 
-    estimate = (await session.execute(
-        select(Estimate).where(Estimate.id == estimate_id)
-    )).scalar_one_or_none()
+    estimate = await _get_estimate_for_view(session, user, estimate_id)
     if not estimate:
-        raise ValueError("Смета не найдена")
+        raise ValueError("Нет доступа к смете")
 
     ver = None
     items = []

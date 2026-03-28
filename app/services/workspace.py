@@ -11,8 +11,19 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import Role, has_role
-from app.models.discount import DiscountRequest
+from app.core.security import (
+    Permission,
+    Role,
+    get_active_role_code,
+    get_active_role_label,
+    get_effective_role_codes,
+    get_max_role_code,
+    get_max_role_label,
+    has_permission,
+    has_role,
+    has_role_switch_access,
+    is_role_switch_overridden,
+)
 from app.models.estimate import Estimate
 from app.models.invite import InviteActivation
 from app.models.notification import Notification
@@ -20,12 +31,29 @@ from app.models.order import Order
 from app.models.payment import Payment
 from app.models.staffing import StaffingAction
 from app.models.user import User
+from app.services.discount import count_pending_for_approver, get_pending_for_approver
+
+
+async def _get_staff_moderation_counts(session: AsyncSession) -> tuple[int, int]:
+    invite_pending = (
+        await session.execute(
+            select(func.count(InviteActivation.id)).where(InviteActivation.status == "pending")
+        )
+    ).scalar() or 0
+    staffing_pending = (
+        await session.execute(
+            select(func.count(StaffingAction.id)).where(StaffingAction.status == "pending")
+        )
+    ).scalar() or 0
+    return invite_pending, staffing_pending
 
 
 def resolve_notification_callback(notification: Notification) -> str:
     """Map a notification to the most relevant bot callback."""
     if notification.event_type == "discount.requested" and notification.entity_id:
         return f"disc_detail:{notification.entity_id}"
+    if notification.event_type == "invite.pending_approval" and notification.entity_id:
+        return f"inv_request:{notification.entity_id}"
     if notification.entity_type == "estimate" and notification.entity_id:
         return f"est_view:{notification.entity_id}"
     if notification.entity_type == "order" and notification.entity_id:
@@ -41,6 +69,8 @@ def resolve_notification_target_label(notification: Notification) -> str | None:
     """Human-friendly target label for inbox cards."""
     if notification.event_type == "discount.requested":
         return "Открыть скидку"
+    if notification.event_type == "invite.pending_approval":
+        return "Открыть запрос на роль"
     if notification.entity_type == "estimate":
         return "Открыть смету"
     if notification.entity_type == "order":
@@ -117,10 +147,9 @@ async def mark_notification_read(
 
 async def get_pending_counts(session: AsyncSession, user: User) -> dict:
     counts: dict[str, int] = {}
-    is_master = any(
-        has_role(user, role)
-        for role in (Role.MASTER, Role.SENIOR_MASTER, Role.ADMIN, Role.PRODUCT_OWNER)
-    )
+    is_master = has_permission(user, Permission.ESTIMATE_CREATE)
+    can_approve_discounts = has_permission(user, Permission.DISCOUNT_APPROVE_BRANCH)
+    can_moderate_staff = has_permission(user, Permission.ADMIN_PANEL)
 
     if is_master:
         draft_estimates = (
@@ -157,15 +186,8 @@ async def get_pending_counts(session: AsyncSession, user: User) -> dict:
         if waiting_review:
             counts["client_reviews"] = waiting_review
 
-    if has_role(user, Role.SENIOR_MASTER) or has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER):
-        pending_approvals = (
-            await session.execute(
-                select(func.count(DiscountRequest.id)).where(
-                    DiscountRequest.assigned_to == user.id,
-                    DiscountRequest.status == "pending",
-                )
-            )
-        ).scalar() or 0
+    if can_approve_discounts:
+        pending_approvals = await count_pending_for_approver(session, user)
         if pending_approvals:
             counts["pending_approvals"] = pending_approvals
 
@@ -180,20 +202,10 @@ async def get_pending_counts(session: AsyncSession, user: User) -> dict:
     if unread_notifications:
         counts["unread_notifications"] = unread_notifications
 
-    if has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER):
-        invite_pending = (
-            await session.execute(
-                select(func.count(InviteActivation.id)).where(InviteActivation.status == "pending")
-            )
-        ).scalar() or 0
+    if can_moderate_staff:
+        invite_pending, staffing_pending = await _get_staff_moderation_counts(session)
         if invite_pending:
             counts["invite_pending"] = invite_pending
-
-        staffing_pending = (
-            await session.execute(
-                select(func.count(StaffingAction.id)).where(StaffingAction.status == "pending")
-            )
-        ).scalar() or 0
         if staffing_pending:
             counts["staffing_pending"] = staffing_pending
 
@@ -204,9 +216,11 @@ async def get_action_items(
     session: AsyncSession,
     *,
     user: User,
+    counts: dict[str, int] | None = None,
     limit: int = 8,
 ) -> list[dict]:
     items: list[dict] = []
+    counts = counts or {}
 
     if has_role(user, Role.CLIENT):
         result = await session.execute(
@@ -226,7 +240,7 @@ async def get_action_items(
                 "callback": f"est_view:{estimate.id}",
             })
 
-    if has_role(user, Role.MASTER) or has_role(user, Role.SENIOR_MASTER) or has_role(user, Role.ADMIN):
+    if has_permission(user, Permission.ESTIMATE_CREATE):
         result = await session.execute(
             select(Estimate)
             .where(
@@ -244,17 +258,8 @@ async def get_action_items(
                 "callback": f"est_view:{estimate.id}",
             })
 
-    if has_role(user, Role.SENIOR_MASTER) or has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER):
-        result = await session.execute(
-            select(DiscountRequest)
-            .where(
-                DiscountRequest.assigned_to == user.id,
-                DiscountRequest.status == "pending",
-            )
-            .order_by(DiscountRequest.created_at.asc())
-            .limit(4)
-        )
-        for request in result.scalars().all():
+    if has_permission(user, Permission.DISCOUNT_APPROVE_BRANCH):
+        for request in await get_pending_for_approver(session, user, limit=4):
             suffix = "%" if request.discount_type == "percent" else "₽"
             items.append({
                 "icon": "💸",
@@ -263,12 +268,11 @@ async def get_action_items(
                 "callback": f"disc_detail:{request.id}",
             })
 
-    if has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER):
-        invite_pending = (
-            await session.execute(
-                select(func.count(InviteActivation.id)).where(InviteActivation.status == "pending")
-            )
-        ).scalar() or 0
+    if has_permission(user, Permission.ADMIN_PANEL):
+        invite_pending = counts.get("invite_pending")
+        staffing_pending = counts.get("staffing_pending")
+        if invite_pending is None or staffing_pending is None:
+            invite_pending, staffing_pending = await _get_staff_moderation_counts(session)
         if invite_pending:
             items.append({
                 "icon": "📨",
@@ -277,11 +281,6 @@ async def get_action_items(
                 "callback": "inv_pending",
             })
 
-        staffing_pending = (
-            await session.execute(
-                select(func.count(StaffingAction.id)).where(StaffingAction.status == "pending")
-            )
-        ).scalar() or 0
         if staffing_pending:
             items.append({
                 "icon": "👥",
@@ -306,7 +305,13 @@ async def get_action_items(
 async def get_dashboard_data(session: AsyncSession, user: User) -> dict:
     counts = await get_pending_counts(session, user)
     data = {
-        "roles": user.role_codes,
+        "roles": get_effective_role_codes(user),
+        "primary_role": get_active_role_code(user),
+        "active_role_label": get_active_role_label(user),
+        "max_role": get_max_role_code(user),
+        "max_role_label": get_max_role_label(user),
+        "is_role_switched": is_role_switch_overridden(user),
+        "can_switch_role": has_role_switch_access(user),
         "name": user.display_name,
         "active_estimates": counts.get("active_estimates", 0),
         "active_orders": counts.get("active_orders", 0),
@@ -317,10 +322,7 @@ async def get_dashboard_data(session: AsyncSession, user: User) -> dict:
         "staffing_pending": counts.get("staffing_pending", 0),
     }
 
-    is_master = any(
-        has_role(user, role)
-        for role in (Role.MASTER, Role.SENIOR_MASTER, Role.ADMIN, Role.PRODUCT_OWNER)
-    )
+    is_master = has_permission(user, Permission.ESTIMATE_CREATE)
     if is_master:
         completed_orders = (
             await session.execute(
@@ -340,7 +342,7 @@ async def get_dashboard_data(session: AsyncSession, user: User) -> dict:
         data["completed_orders"] = completed_orders
         data["total_earned"] = total_earned
 
-    data["action_items"] = await get_action_items(session, user=user)
+    data["action_items"] = await get_action_items(session, user=user, counts=counts)
     recent_notifications = await list_notifications_for_user(session, user_id=user.id, limit=5)
     data["recent_notifications"] = [serialize_notification(item) for item in recent_notifications]
     return data

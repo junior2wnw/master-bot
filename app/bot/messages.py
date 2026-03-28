@@ -15,6 +15,7 @@ from app.bot.ui import (
     money,
     stat_line,
 )
+from app.core.security import highest_role_label
 
 # ═══════════════════════════════════════════════════════════════
 # START / NAVIGATION
@@ -59,22 +60,20 @@ def welcome(name: str, stats: dict | None = None) -> str:
 
 
 def profile(user_data: dict) -> str:
-    roles_map = {
-        "product_owner": "🏢 Product Owner",
-        "admin": "⚙️ Администратор",
-        "senior_master": "👨‍🔧 Старший мастер",
-        "master": "🔧 Мастер",
-        "client": "👤 Клиент",
-    }
-    roles = "\n".join(f"  {roles_map.get(r, r)}" for r in user_data["roles"])
+    active_role = user_data.get("active_role_label") or highest_role_label(user_data.get("roles", []))
+    max_role = user_data.get("max_role_label") or active_role
+    is_role_switched = user_data.get("is_role_switched", False)
 
     text = (
         f"{header('👤', 'Профиль')}\n"
         f"{THIN_LINE}\n"
         f"Имя: <b>{user_data['name']}</b>\n"
         f"ID: <code>{user_data['id']}</code>\n\n"
-        f"Роли:\n{roles}\n"
+        f"Текущий режим: <b>{active_role}</b>\n"
     )
+
+    if is_role_switched:
+        text += f"Максимальная роль: <b>{max_role}</b>\n"
 
     if user_data.get("branch"):
         text += f"\n🏗 Ветка: {user_data['branch']}"
@@ -461,14 +460,14 @@ def admin_users_stats(role_counts: dict, total: int) -> str:
 
 
 def admin_user_card(user: dict) -> str:
-    roles = ", ".join(user.get("roles", []))
+    max_role = user.get("max_role_label") or highest_role_label(user.get("roles", []))
     status = "✅ Активен" if user.get("is_active") else "❌ Неактивен"
     text = (
         f"{header('👤', user['name'])}\n"
         f"{THIN_LINE}\n"
         f"ID: <code>{user['id']}</code>\n"
         f"Telegram: <code>{user.get('telegram_id', '?')}</code>\n"
-        f"Роли: {roles}\n"
+        f"Роль: {max_role}\n"
         f"Статус: {status}\n"
     )
     if user.get("branch"):

@@ -98,10 +98,15 @@ def safe_bool(val, default=True) -> bool:
 
 async def run_import(excel_path: str, dry_run: bool = False, drop_existing: bool = False):
     """Main import logic."""
-    from sqlalchemy import delete, select, text
-    from app.database import get_async_session, get_engine
+    from sqlalchemy import delete, select
+
+    from app.database import get_async_session
     from app.models.catalog import (
-        Profession, ServiceGroup, ServiceItem, ServiceSubgroup, SharedOperation,
+        Profession,
+        ServiceGroup,
+        ServiceItem,
+        ServiceSubgroup,
+        SharedOperation,
     )
     from app.models.coefficient import Coefficient
 
@@ -421,9 +426,7 @@ async def run_import(excel_path: str, dry_run: bool = False, drop_existing: bool
         logger.info("=== Импорт завершён успешно ===")
 
         # Summary
-        total_items = (await session.execute(
-            select(sa_func.count(ServiceItem.id))
-        )).scalar() if False else items_added + items_updated
+        total_items = items_added + items_updated
 
         logger.info("ИТОГО:")
         logger.info("  Профессий:       %d", len(professions_map))
@@ -431,7 +434,7 @@ async def run_import(excel_path: str, dry_run: bool = False, drop_existing: bool
         logger.info("  Подгрупп:        %d", len(subgroups_map))
         logger.info("  Общих операций:  %d", shared_count)
         logger.info("  Позиций:         %d (новых: %d, обновлённых: %d)",
-                     items_added + items_updated, items_added, items_updated)
+                     total_items, items_added, items_updated)
         logger.info("  Коэффициентов:   %d", coeff_count)
 
 

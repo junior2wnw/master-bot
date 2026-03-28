@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_audit
@@ -176,15 +176,42 @@ async def reject_discount(
 
 async def get_pending_for_approver(
     session: AsyncSession,
-    approver_id: int,
+    approver: User,
+    *,
+    limit: int | None = None,
 ) -> list[DiscountRequest]:
-    result = await session.execute(
-        select(DiscountRequest).where(
-            DiscountRequest.assigned_to == approver_id,
-            DiscountRequest.status == "pending",
-        )
+    query = (
+        select(DiscountRequest)
+        .where(*pending_discount_filters(approver))
+        .order_by(DiscountRequest.created_at.desc())
     )
+    if limit is not None:
+        query = query.limit(limit)
+    result = await session.execute(query)
     return list(result.scalars().all())
+
+
+async def count_pending_for_approver(
+    session: AsyncSession,
+    approver: User,
+) -> int:
+    result = await session.execute(
+        select(func.count(DiscountRequest.id)).where(*pending_discount_filters(approver))
+    )
+    return result.scalar() or 0
+
+
+def pending_discount_filters(approver: User) -> tuple:
+    filters = [DiscountRequest.status == "pending"]
+    if not (has_role(approver, Role.PRODUCT_OWNER) or has_role(approver, Role.ADMIN)):
+        filters.append(DiscountRequest.assigned_to == approver.id)
+    return tuple(filters)
+
+
+def can_access_discount_request(request: DiscountRequest, approver: User) -> bool:
+    if has_role(approver, Role.PRODUCT_OWNER) or has_role(approver, Role.ADMIN):
+        return True
+    return has_role(approver, Role.SENIOR_MASTER) and request.assigned_to == approver.id
 
 
 async def _find_approver(session: AsyncSession, requester: User) -> int | None:
@@ -218,7 +245,15 @@ async def _find_approver(session: AsyncSession, requester: User) -> int | None:
             select(UserRole.user_id).where(UserRole.role_code == Role.ADMIN.value)
         )
     ).scalar_one_or_none()
-    return admin
+    if admin is not None:
+        return admin
+
+    owner = (
+        await session.execute(
+            select(UserRole.user_id).where(UserRole.role_code == Role.PRODUCT_OWNER.value)
+        )
+    ).scalar_one_or_none()
+    return owner
 
 
 async def _get_discount_request(session: AsyncSession, request_id: int) -> DiscountRequest:
@@ -246,9 +281,7 @@ async def _get_estimate(session: AsyncSession, estimate_id: int) -> Estimate:
 def _check_can_approve(request: DiscountRequest, approver: User) -> None:
     if request.status != "pending":
         raise ValidationError(f"Запрос уже обработан: {request.status}")
-    if has_role(approver, Role.PRODUCT_OWNER) or has_role(approver, Role.ADMIN):
-        return
-    if has_role(approver, Role.SENIOR_MASTER) and request.assigned_to == approver.id:
+    if can_access_discount_request(request, approver):
         return
     raise PermissionDenied("Вы не можете согласовать эту скидку")
 

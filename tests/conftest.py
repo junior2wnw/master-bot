@@ -1,7 +1,6 @@
 """Test fixtures. Uses in-memory models for pure logic tests."""
 
 import pytest
-from unittest.mock import MagicMock
 
 
 class FakeUserRole:
@@ -20,6 +19,7 @@ class FakeUser:
         self.id = id
         self.roles = [FakeUserRole(r) for r in roles]
         self.branch_memberships = branch_memberships or []
+        self.active_role_code = None
         self.is_active = True
 
     @property

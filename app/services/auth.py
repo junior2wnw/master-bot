@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
-from app.core.exceptions import ValidationError
+from app.core.exceptions import ConflictError, ValidationError
 from app.core.security import Role
 from app.models.user import User, UserRole
 
@@ -105,14 +105,22 @@ async def grant_role(
 ) -> None:
     """Add a role to user if they don't already have it."""
     resolved_role = _resolve_role_input(role=role, role_code=role_code)
-    existing = [r.role_code for r in user.roles]
-    if resolved_role.value in existing:
+    result = await session.execute(
+        select(UserRole).where(
+            UserRole.user_id == user.id,
+            UserRole.role_code == resolved_role.value,
+        )
+    )
+    if result.scalar_one_or_none():
+        await session.refresh(user, ["roles"])
         return
 
     user_role = UserRole(user_id=user.id, role_code=resolved_role.value, granted_by=granted_by)
     session.add(user_role)
     await session.flush()
     await session.refresh(user, ["roles"])
+    if resolved_role.value not in user.role_codes:
+        raise ConflictError(f"Не удалось назначить роль: {resolved_role.value}")
 
     await log_audit(
         session,
@@ -145,6 +153,8 @@ async def revoke_role(
         await session.delete(user_role)
         await session.flush()
         await session.refresh(user, ["roles"])
+        if resolved_role.value in user.role_codes:
+            raise ConflictError(f"Не удалось отозвать роль: {resolved_role.value}")
 
         await log_audit(
             session,

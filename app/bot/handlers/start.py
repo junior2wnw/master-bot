@@ -1,17 +1,38 @@
 """Start handler: registration, workspace, profile, and Mini App entry."""
 
+import base64
 import re
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import messages
+from app.bot import keyboards, messages
+from app.bot.ui import fit_button_text
 from app.config import get_settings
+from app.core.security import (
+    Permission,
+    get_active_role_label,
+    get_effective_role_codes,
+    get_max_role_label,
+    has_permission,
+    has_role_switch_access,
+    is_role_switch_overridden,
+)
 from app.services.auth import get_or_create_user, get_user_by_telegram_id
 from app.services.invite import activate_invite
+from app.services.profile import (
+    BOT_PROFILE_FIELDS,
+    PROFILE_FIELD_META,
+    get_profile_payload,
+    profile_payload_to_export_profile,
+    update_profile_fields,
+)
+from app.services.role_context import build_role_context_payload, set_active_role
 from app.services.workspace import (
     get_action_items,
     get_dashboard_data,
@@ -25,6 +46,10 @@ from app.services.workspace import (
 router = Router()
 
 
+class ProfileStates(StatesGroup):
+    editing_field = State()
+
+
 async def _show_main_menu(
     target,
     session: AsyncSession,
@@ -34,7 +59,7 @@ async def _show_main_menu(
 ) -> None:
     summary = await get_dashboard_data(session, user)
     text = messages.welcome(user.display_name, summary)
-    markup = _main_menu_markup(user.role_codes, summary)
+    markup = keyboards.main_menu(get_effective_role_codes(user), summary)
 
     if edit:
         await target.edit_text(text, reply_markup=markup)
@@ -73,10 +98,19 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
 
 
 @router.message(Command("app"))
-async def cmd_open_app(message: Message) -> None:
+async def cmd_open_app(message: Message, session: AsyncSession) -> None:
     """Open Mini App via inline button with WebAppInfo."""
     settings = get_settings()
     webapp_url = settings.webapp_url
+    user = await get_user_by_telegram_id(session, message.from_user.id)
+    if not user:
+        user, _ = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            first_name=message.from_user.first_name or "User",
+            last_name=message.from_user.last_name,
+            username=message.from_user.username,
+        )
 
     if not webapp_url:
         await message.answer(
@@ -222,23 +256,171 @@ async def cb_profile(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer("Пользователь не найден", show_alert=True)
         return
 
+    settings = get_settings()
     data = {
         "name": user.display_name,
-        "roles": user.role_codes,
+        "roles": get_effective_role_codes(user),
+        "active_role_label": get_active_role_label(user),
+        "max_role_label": get_max_role_label(user),
+        "is_role_switched": is_role_switch_overridden(user),
         "id": user.id,
         "phone": getattr(user, "phone", None),
         "username": getattr(user, "username", None),
         "joined": user.created_at.strftime("%d.%m.%Y") if getattr(user, "created_at", None) else None,
     }
 
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))
-
     await callback.message.edit_text(
         messages.profile(data),
-        reply_markup=kb.as_markup(),
+        reply_markup=keyboards.profile_actions(
+            get_effective_role_codes(user),
+            can_switch_role=has_role_switch_access(user),
+            webapp_url=settings.webapp_url,
+        ),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "profile_role_mode")
+async def cb_profile_role_mode(callback: CallbackQuery, session: AsyncSession) -> None:
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    if not has_role_switch_access(user):
+        await callback.answer("Переключение ролей недоступно", show_alert=True)
+        return
+
+    context = build_role_context_payload(user)
+    await callback.message.edit_text(
+        _render_role_switcher(context),
+        reply_markup=keyboards.role_switcher(context),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("profile_role_set:"))
+async def cb_profile_role_set(callback: CallbackQuery, session: AsyncSession) -> None:
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    if not has_role_switch_access(user):
+        await callback.answer("Переключение ролей недоступно", show_alert=True)
+        return
+
+    role_code = callback.data.split(":", 1)[1]
+    context = await set_active_role(
+        session,
+        user=user,
+        role_code=None if role_code == "auto" else role_code,
+        changed_by=user.id,
+    )
+    await callback.message.edit_text(
+        _render_role_switcher(context),
+        reply_markup=keyboards.role_switcher(context),
+    )
+    await callback.answer(
+        f"Режим: {context['active_role_label']}",
+        show_alert=True,
+    )
+
+
+@router.callback_query(F.data == "profile_edit")
+async def cb_profile_edit(callback: CallbackQuery, session: AsyncSession) -> None:
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    settings = get_settings()
+    profile = await get_profile_payload(session, user)
+    fields = [(field, PROFILE_FIELD_META[field]["label"]) for field in BOT_PROFILE_FIELDS]
+    await callback.message.edit_text(
+        _render_profile_editor(profile),
+        reply_markup=keyboards.profile_editor(fields, webapp_url=settings.webapp_url),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "profile_requisites")
+async def cb_profile_requisites(callback: CallbackQuery, session: AsyncSession) -> None:
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user or not has_permission(user, Permission.ESTIMATE_CREATE):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    from aiogram.types import BufferedInputFile
+    from app.services.estimate_export import generate_payment_qr
+
+    profile = await get_profile_payload(session, user)
+    export_profile = profile_payload_to_export_profile(profile)
+    qr = generate_payment_qr(export_profile, purpose="Оплата услуг")
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="✏️ Изменить реквизиты", callback_data="profile_edit"),
+        InlineKeyboardButton(text="← Профиль", callback_data="profile"),
+    )
+
+    text = _render_profile_requisites(profile, qr)
+    if qr.get("qr_image"):
+        photo = BufferedInputFile(base64.b64decode(qr["qr_image"]), filename="profile_qr.png")
+        await callback.message.answer_photo(photo, caption=text, reply_markup=kb.as_markup())
+    else:
+        await callback.message.answer(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("profile_field:"))
+async def cb_profile_field(callback: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
+    field = callback.data.split(":", 1)[1]
+    if field not in PROFILE_FIELD_META:
+        await callback.answer("Поле не поддерживается", show_alert=True)
+        return
+
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    profile = await get_profile_payload(session, user)
+    await state.update_data(profile_field=field)
+    await state.set_state(ProfileStates.editing_field)
+
+    await callback.message.edit_text(
+        _render_profile_field_prompt(field, profile.get(field, "")),
+        reply_markup=_profile_field_prompt_markup(),
+    )
+    await callback.answer()
+
+
+@router.message(ProfileStates.editing_field)
+async def msg_profile_field_value(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    data = await state.get_data()
+    field = data.get("profile_field")
+    if field not in PROFILE_FIELD_META:
+        await state.clear()
+        return
+
+    user = await get_user_by_telegram_id(session, message.from_user.id)
+    if not user:
+        await state.clear()
+        return
+
+    value = (message.text or "").strip()
+    normalized = None if value in {"-", "—"} else value
+    await update_profile_fields(session, user, **{field: normalized})
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="✏️ Еще поле", callback_data="profile_edit"),
+        InlineKeyboardButton(text="← Профиль", callback_data="profile"),
+    )
+    await message.answer(
+        f"✅ Поле «{PROFILE_FIELD_META[field]['label']}» обновлено.",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(F.data == "noop")
@@ -247,92 +429,98 @@ async def cb_noop(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-def _main_menu_markup(roles: list[str], summary: dict):
+def _profile_field_prompt_markup():
     kb = InlineKeyboardBuilder()
-    settings = get_settings()
-    if settings.webapp_url:
-        kb.row(InlineKeyboardButton(
-            text="📱 Открыть приложение",
-            web_app=WebAppInfo(url=settings.webapp_url),
-        ))
-
-    workbench_count = (
-        summary.get("pending_approvals", 0)
-        + summary.get("client_reviews", 0)
-        + summary.get("invite_pending", 0)
-        + summary.get("staffing_pending", 0)
-    )
-    workbench_label = "⚡ Что сделать"
-    if workbench_count:
-        workbench_label += f" ({workbench_count})"
-
-    inbox_label = "🔔 Уведомления"
-    if summary.get("unread_notifications"):
-        inbox_label += f" ({summary['unread_notifications']})"
-    kb.row(
-        InlineKeyboardButton(text=workbench_label, callback_data="workbench"),
-        InlineKeyboardButton(text=inbox_label, callback_data="inbox"),
-    )
-
-    quick_buttons = []
-    if any(role in roles for role in ("master", "senior_master", "admin", "product_owner")):
-        quick_buttons.append(InlineKeyboardButton(text="🧮 Новая смета", callback_data="est_new"))
-    if "client" in roles:
-        quick_buttons.append(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
-    if quick_buttons:
-        kb.row(*quick_buttons[:2])
-
-    kb.row(
-        InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
-        InlineKeyboardButton(text="🔍 Поиск", callback_data="search"),
-    )
-
-    if "client" in roles:
-        orders_label = "📝 Заказы"
-        if summary.get("active_orders"):
-            orders_label += f" ({summary['active_orders']})"
-        kb.row(InlineKeyboardButton(text=orders_label, callback_data="my_orders"))
-
-    if any(role in roles for role in ("master", "senior_master", "admin", "product_owner")):
-        estimates_label = "📊 Сметы"
-        if summary.get("active_estimates"):
-            estimates_label += f" ({summary['active_estimates']})"
-        kb.row(
-            InlineKeyboardButton(text=estimates_label, callback_data="my_estimates"),
-            InlineKeyboardButton(text="💰 Доходы", callback_data="my_earnings"),
-        )
-
-    if "senior_master" in roles:
-        approvals_label = "✅ Согласования"
-        if summary.get("pending_approvals"):
-            approvals_label += f" ({summary['pending_approvals']})"
-        kb.row(
-            InlineKeyboardButton(text="👥 Ветка", callback_data="my_branch"),
-            InlineKeyboardButton(text=approvals_label, callback_data="approvals"),
-        )
-
-    if "admin" in roles:
-        admin_label = "⚙️ Админ"
-        admin_pending = summary.get("invite_pending", 0) + summary.get("staffing_pending", 0)
-        if admin_pending:
-            admin_label += f" ({admin_pending})"
-        kb.row(InlineKeyboardButton(text=admin_label, callback_data="admin_panel"))
-
-    if "product_owner" in roles:
-        kb.row(InlineKeyboardButton(text="📈 Мониторинг", callback_data="owner_panel"))
-
-    kb.row(InlineKeyboardButton(text="👤 Профиль", callback_data="profile"))
+    kb.row(InlineKeyboardButton(text="← К реквизитам", callback_data="profile_edit"))
+    kb.row(InlineKeyboardButton(text="← Профиль", callback_data="profile"))
     return kb.as_markup()
+
+
+def _render_profile_field_prompt(field: str, current_value: str | None) -> str:
+    meta = PROFILE_FIELD_META[field]
+    current = current_value or "не заполнено"
+    return (
+        f"✏️ <b>{meta['label']}</b>\n\n"
+        f"Текущее значение: <code>{current}</code>\n\n"
+        f"Отправьте новое значение одним сообщением.\n"
+        f"Подсказка: {meta['placeholder']}\n"
+        "Отправьте <code>-</code>, чтобы очистить поле."
+    )
+
+
+def _render_profile_editor(profile: dict) -> str:
+    lines = [
+        "👤 <b>Личные данные и реквизиты</b>",
+        "",
+        "Заполненные данные сразу используются в QR и выгрузках смет.",
+        "",
+    ]
+    for field in BOT_PROFILE_FIELDS:
+        label = PROFILE_FIELD_META[field]["label"]
+        value = profile.get(field) or "—"
+        lines.append(f"{label}: <code>{value}</code>")
+    return "\n".join(lines)
+
+
+def _render_profile_requisites(profile: dict, qr: dict) -> str:
+    lines = [
+        "🏦 <b>Мои реквизиты</b>",
+        "",
+        "QR сформирован без суммы: клиент сможет ввести сумму вручную в банковском приложении.",
+        "",
+    ]
+    if profile.get("payment_recipient"):
+        lines.append(f"👤 Получатель: <code>{profile['payment_recipient']}</code>")
+    if profile.get("bank_name"):
+        lines.append(f"🏦 Банк: <code>{profile['bank_name']}</code>")
+    if profile.get("settlement_account"):
+        lines.append(f"📋 Р/с: <code>{profile['settlement_account']}</code>")
+    if profile.get("correspondent_account"):
+        lines.append(f"📋 Корр. счет: <code>{profile['correspondent_account']}</code>")
+    if profile.get("bik"):
+        lines.append(f"📋 БИК: <code>{profile['bik']}</code>")
+    if profile.get("inn"):
+        lines.append(f"📋 ИНН: <code>{profile['inn']}</code>")
+    if profile.get("card_number"):
+        lines.append(f"💳 Карта: <code>{profile['card_number']}</code>")
+    if profile.get("sbp_phone"):
+        lines.append(f"📱 СБП: <code>{profile['sbp_phone']}</code>")
+    if qr.get("missing_bank_fields"):
+        lines.extend([
+            "",
+            "⚠️ Для банковского QR заполните:",
+            ", ".join(qr["missing_bank_fields"]),
+        ])
+    return "\n".join(lines)
+
+
+def _render_role_switcher(context: dict) -> str:
+    lines = [
+        "🎭 <b>Режим роли</b>",
+        "",
+        f"Сейчас вы работаете как: <b>{context['active_role_label']}</b>",
+        f"Максимальная ваша роль: <b>{context['max_role_label']}</b>",
+    ]
+    if context.get("is_role_switched"):
+        lines.extend([
+            "",
+            "Включен временный низкий контур прав. Это удобно для теста UI и бизнес-сценариев.",
+        ])
+    lines.extend([
+        "",
+        "Выберите нужный режим. Прямые роли в БД не меняются.",
+    ])
+    return "\n".join(lines)
 
 
 def _action_center_markup(actions: list[dict]):
     kb = InlineKeyboardBuilder()
     for action in actions:
-        title = action.get("title", "Открыть")
-        if len(title) > 38:
-            title = title[:35] + "…"
         kb.row(InlineKeyboardButton(
-            text=f"{action.get('icon', '•')} {title}",
+            text=fit_button_text(
+                f"{action.get('icon', '•')} {action.get('title', 'Открыть')}",
+                max_len=38,
+            ),
             callback_data=action.get("callback", "main_menu"),
         ))
     if not actions:
@@ -351,11 +539,11 @@ def _notifications_markup(notifications: list[dict]):
     kb = InlineKeyboardBuilder()
     for item in notifications:
         prefix = "🔔" if item.get("is_unread") else "✅"
-        title = item.get("title", "Уведомление")
-        if len(title) > 34:
-            title = title[:31] + "…"
         kb.row(InlineKeyboardButton(
-            text=f"{prefix} {title}",
+            text=fit_button_text(
+                f"{prefix} {item.get('title', 'Уведомление')}",
+                max_len=34,
+            ),
             callback_data=f"notif_open:{item['id']}",
         ))
     kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))

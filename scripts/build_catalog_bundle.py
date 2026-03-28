@@ -24,6 +24,7 @@ from scripts.import_it_catalog import (
     parse_macbook_tables,
     parse_main_table,
 )
+from scripts.manual_catalog_extensions import apply_manual_extensions
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_EXCEL_PATH = ROOT_DIR / "sterlitamak_services_catalog_v1 (3).xlsx"
@@ -503,6 +504,7 @@ def validate_bundle(bundle: dict[str, Any]) -> None:
 
 def build_bundle(excel_path: Path, docx_path: Path) -> dict[str, Any]:
     bundle = merge_catalogs(build_base_catalog(excel_path), build_it_catalog(docx_path))
+    bundle = apply_manual_extensions(bundle)
     validate_bundle(bundle)
     return bundle
 

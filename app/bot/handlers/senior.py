@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
 from app.bot.ui import THIN_LINE, money
-from app.core.security import Role, has_role
+from app.core.security import Role, has_role, is_senior_in_branch
+from app.core.exceptions import PermissionDenied
 from app.models.discount import DiscountRequest
 from app.models.estimate import Estimate
 from app.models.hierarchy import Branch, BranchMember
@@ -16,7 +17,12 @@ from app.models.order import Order
 from app.models.payment import CommissionRecord, Payment
 from app.models.user import User
 from app.services.auth import get_user_by_telegram_id
-from app.services.discount import approve_discount, get_pending_for_approver, reject_discount
+from app.services.discount import (
+    approve_discount,
+    can_access_discount_request,
+    get_pending_for_approver,
+    reject_discount,
+)
 
 router = Router()
 
@@ -27,6 +33,13 @@ async def _check_senior(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Доступно только старшим мастерам", show_alert=True)
         return None
     return user
+
+
+async def _ensure_branch_access(callback: CallbackQuery, user: User, branch_id: int) -> bool:
+    if is_senior_in_branch(user, branch_id):
+        return True
+    await callback.answer("Нет доступа к этой ветке", show_alert=True)
+    return False
 
 
 @router.callback_query(F.data == "my_branch")
@@ -56,7 +69,7 @@ async def cb_my_branch(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     if len(memberships) == 1:
-        await _show_branch(callback, session, memberships[0].branch_id)
+        await _show_branch(callback, session, user, memberships[0].branch_id)
         await callback.answer()
         return
 
@@ -84,11 +97,14 @@ async def cb_branch_view(callback: CallbackQuery, session: AsyncSession) -> None
     if not user:
         return
     branch_id = int(callback.data.split(":")[1])
-    await _show_branch(callback, session, branch_id)
+    await _show_branch(callback, session, user, branch_id)
     await callback.answer()
 
 
-async def _show_branch(callback: CallbackQuery, session: AsyncSession, branch_id: int) -> None:
+async def _show_branch(callback: CallbackQuery, session: AsyncSession, user: User, branch_id: int) -> None:
+    if not await _ensure_branch_access(callback, user, branch_id):
+        return
+
     branch = (
         await session.execute(select(Branch).where(Branch.id == branch_id))
     ).scalar_one_or_none()
@@ -135,6 +151,9 @@ async def cb_branch_stats(callback: CallbackQuery, session: AsyncSession) -> Non
         return
 
     branch_id = int(callback.data.split(":")[1])
+    if not await _ensure_branch_access(callback, user, branch_id):
+        return
+
     member_ids = [
         row[0]
         for row in (
@@ -180,7 +199,10 @@ async def cb_branch_stats(callback: CallbackQuery, session: AsyncSession) -> Non
     my_share = (
         await session.execute(
             select(func.coalesce(func.sum(CommissionRecord.senior_master_share), 0))
-            .where(CommissionRecord.senior_master_id == user.id)
+            .where(
+                CommissionRecord.senior_master_id == user.id,
+                CommissionRecord.master_id.in_(member_ids),
+            )
         )
     ).scalar() or 0
 
@@ -206,6 +228,9 @@ async def cb_branch_invite(callback: CallbackQuery, session: AsyncSession) -> No
         return
 
     branch_id = int(callback.data.split(":")[1])
+    if not await _ensure_branch_access(callback, user, branch_id):
+        return
+
     from app.services.invite import create_invite
 
     try:
@@ -234,6 +259,9 @@ async def cb_branch_members(callback: CallbackQuery, session: AsyncSession) -> N
         return
 
     branch_id = int(callback.data.split(":")[1])
+    if not await _ensure_branch_access(callback, user, branch_id):
+        return
+
     members = (
         await session.execute(
             select(BranchMember).where(
@@ -274,7 +302,7 @@ async def cb_approvals(callback: CallbackQuery, session: AsyncSession) -> None:
     if not user:
         return
 
-    pending = await get_pending_for_approver(session, user.id)
+    pending = await get_pending_for_approver(session, user)
     if not pending:
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))
@@ -307,11 +335,18 @@ async def cb_approvals(callback: CallbackQuery, session: AsyncSession) -> None:
 @router.callback_query(F.data.startswith("disc_detail:"))
 async def cb_discount_detail(callback: CallbackQuery, session: AsyncSession) -> None:
     request_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        return
+
     request = (
         await session.execute(select(DiscountRequest).where(DiscountRequest.id == request_id))
     ).scalar_one_or_none()
     if not request:
         await callback.answer("Запрос не найден", show_alert=True)
+        return
+    if not can_access_discount_request(request, user):
+        await callback.answer("Нет доступа к этому запросу", show_alert=True)
         return
 
     master = (

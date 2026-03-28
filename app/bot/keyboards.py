@@ -12,15 +12,16 @@ Design principles:
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.bot.ui import add_back_row, add_pagination_row, grid_buttons
+from app.bot.ui import add_back_row, add_pagination_row, fit_button_text, grid_buttons
+from app.core.security import Permission, has_permission_for_roles
 
 # ═══════════════════════════════════════════════════════════════
 # MAIN MENU
 # ═══════════════════════════════════════════════════════════════
 
-def main_menu(roles: list[str], pending: dict | None = None) -> InlineKeyboardMarkup:
-    """Dashboard main menu with pending action badges."""
-    p = pending or {}
+def main_menu(roles: list[str], summary: dict | None = None) -> InlineKeyboardMarkup:
+    """Dashboard main menu driven by permission inheritance."""
+    s = summary or {}
     kb = InlineKeyboardBuilder()
 
     # Mini App button (if webapp_url is configured)
@@ -33,43 +34,69 @@ def main_menu(roles: list[str], pending: dict | None = None) -> InlineKeyboardMa
             web_app=WebAppInfo(url=settings.webapp_url),
         ))
 
-    # Top row: key actions for everyone
+    workbench_count = (
+        s.get("pending_approvals", 0)
+        + s.get("client_reviews", 0)
+        + s.get("invite_pending", 0)
+        + s.get("staffing_pending", 0)
+    )
+    workbench_label = "⚡ Что сделать"
+    if workbench_count:
+        workbench_label += f" ({workbench_count})"
+
+    inbox_label = "🔔 Уведомления"
+    if s.get("unread_notifications"):
+        inbox_label += f" ({s['unread_notifications']})"
+    kb.row(
+        InlineKeyboardButton(text=workbench_label, callback_data="workbench"),
+        InlineKeyboardButton(text=inbox_label, callback_data="inbox"),
+    )
+
+    quick_buttons: list[InlineKeyboardButton] = []
+    if has_permission_for_roles(roles, Permission.ESTIMATE_CREATE):
+        quick_buttons.append(InlineKeyboardButton(text="🧮 Новая смета", callback_data="est_new"))
+    if has_permission_for_roles(roles, Permission.ORDER_CREATE):
+        quick_buttons.append(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
+    if quick_buttons:
+        kb.row(*quick_buttons[:2])
+
     kb.row(
         InlineKeyboardButton(text="📋 Каталог", callback_data="catalog"),
         InlineKeyboardButton(text="🔍 Поиск", callback_data="search"),
     )
 
-    if "client" in roles:
+    if has_permission_for_roles(roles, Permission.ORDER_VIEW_OWN):
         orders_label = "📝 Заказы"
-        if p.get("orders"):
-            orders_label += f" ({p['orders']})"
+        if s.get("active_orders"):
+            orders_label += f" ({s['active_orders']})"
         kb.row(InlineKeyboardButton(text=orders_label, callback_data="my_orders"))
 
-    if any(r in roles for r in ("master", "senior_master", "admin", "product_owner")):
+    if has_permission_for_roles(roles, Permission.ESTIMATE_CREATE):
         est_label = "📊 Сметы"
-        if p.get("estimates"):
-            est_label += f" ({p['estimates']})"
+        if s.get("active_estimates"):
+            est_label += f" ({s['active_estimates']})"
         kb.row(
             InlineKeyboardButton(text=est_label, callback_data="my_estimates"),
             InlineKeyboardButton(text="💰 Доходы", callback_data="my_earnings"),
         )
 
-    if "senior_master" in roles:
+    if has_permission_for_roles(roles, Permission.DISCOUNT_APPROVE_BRANCH):
         appr_label = "✅ Согласования"
-        if p.get("approvals"):
-            appr_label += f" ({p['approvals']})"
+        if s.get("pending_approvals"):
+            appr_label += f" ({s['pending_approvals']})"
         kb.row(
             InlineKeyboardButton(text="👥 Ветка", callback_data="my_branch"),
             InlineKeyboardButton(text=appr_label, callback_data="approvals"),
         )
 
-    if "admin" in roles:
+    if has_permission_for_roles(roles, Permission.ADMIN_PANEL):
         adm_label = "⚙️ Админ"
-        if p.get("admin_pending"):
-            adm_label += f" ({p['admin_pending']})"
+        admin_pending = s.get("invite_pending", 0) + s.get("staffing_pending", 0)
+        if admin_pending:
+            adm_label += f" ({admin_pending})"
         kb.row(InlineKeyboardButton(text=adm_label, callback_data="admin_panel"))
 
-    if "product_owner" in roles:
+    if has_permission_for_roles(roles, Permission.OWNER_PANEL):
         kb.row(InlineKeyboardButton(text="📈 Мониторинг", callback_data="owner_panel"))
 
     kb.row(InlineKeyboardButton(text="👤 Профиль", callback_data="profile"))
@@ -80,13 +107,106 @@ def main_menu(roles: list[str], pending: dict | None = None) -> InlineKeyboardMa
 # CATALOG
 # ═══════════════════════════════════════════════════════════════
 
+def profile_actions(
+    roles: list[str],
+    *,
+    can_switch_role: bool = False,
+    webapp_url: str | None = None,
+) -> InlineKeyboardMarkup:
+    """Profile actions follow the same inherited permission matrix as the main menu."""
+    kb = InlineKeyboardBuilder()
+
+    if webapp_url:
+        from aiogram.types import WebAppInfo
+
+        kb.row(InlineKeyboardButton(
+            text="👤 Данные и реквизиты",
+            web_app=WebAppInfo(url=webapp_url),
+        ))
+    else:
+        kb.row(InlineKeyboardButton(
+            text="👤 Данные и реквизиты",
+            callback_data="profile_edit",
+        ))
+
+    if has_permission_for_roles(roles, Permission.ESTIMATE_CREATE):
+        kb.row(InlineKeyboardButton(text="🏦 Реквизиты и QR", callback_data="profile_requisites"))
+        kb.row(
+            InlineKeyboardButton(text="💰 Доходы", callback_data="my_earnings"),
+            InlineKeyboardButton(text="📊 Мои сметы", callback_data="my_estimates"),
+        )
+
+    if has_permission_for_roles(roles, Permission.ORDER_VIEW_OWN):
+        kb.row(InlineKeyboardButton(text="📝 Мои заказы", callback_data="my_orders"))
+
+    if has_permission_for_roles(roles, Permission.DISCOUNT_APPROVE_BRANCH):
+        kb.row(InlineKeyboardButton(text="✅ Согласования", callback_data="approvals"))
+
+    if has_permission_for_roles(roles, Permission.ADMIN_PANEL):
+        kb.row(InlineKeyboardButton(text="⚙️ Админ", callback_data="admin_panel"))
+
+    if has_permission_for_roles(roles, Permission.OWNER_PANEL):
+        kb.row(InlineKeyboardButton(text="📈 Мониторинг", callback_data="owner_panel"))
+
+    if can_switch_role:
+        kb.row(InlineKeyboardButton(text="🎭 Режим роли", callback_data="profile_role_mode"))
+
+    add_back_row(kb, "Меню", "main_menu")
+    return kb.as_markup()
+
+
+def role_switcher(context: dict) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+
+    auto_label = f"Авто: {context['max_role_label']}"
+    if context.get("is_role_switched"):
+        auto_label = f"Сбросить: {context['max_role_label']}"
+    kb.row(
+        InlineKeyboardButton(
+            text=fit_button_text(auto_label, max_len=32),
+            callback_data="profile_role_set:auto",
+        )
+    )
+
+    current_role = context.get("active_role")
+    for role in context.get("available_roles", []):
+        prefix = "✅ " if role["code"] == current_role else ""
+        kb.row(
+            InlineKeyboardButton(
+                text=fit_button_text(f"{prefix}{role['label']}", max_len=32),
+                callback_data=f"profile_role_set:{role['code']}",
+            )
+        )
+
+    add_back_row(kb, "Профиль", "profile")
+    return kb.as_markup()
+
+
+def profile_editor(fields: list[tuple[str, str]], *, webapp_url: str | None = None) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for code, label in fields:
+        kb.row(InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"profile_field:{code}"))
+
+    if webapp_url:
+        from aiogram.types import WebAppInfo
+
+        kb.row(InlineKeyboardButton(
+            text="📱 Mini App",
+            web_app=WebAppInfo(url=webapp_url),
+        ))
+
+    add_back_row(kb, "Профиль", "profile")
+    return kb.as_markup()
+
+
 def professions_list(professions: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for p in professions:
         icon = p.get("icon", "🔧")
         count = f" · {p['count']}" if p.get("count") else ""
+        title = fit_button_text(p["name"], max_len=26, suffix=count)
         kb.row(InlineKeyboardButton(
-            text=f"{icon} {p['name']}{count}",
+            text=f"{icon} {title}",
             callback_data=f"prof:{p['id']}",
         ))
     # Popular items shortcut
@@ -101,7 +221,7 @@ def groups_list(groups: list[dict], profession_id: int) -> InlineKeyboardMarkup:
     for g in groups:
         count = f" ({g['count']})" if g.get("count") else ""
         btns.append(InlineKeyboardButton(
-            text=f"{g['name']}{count}",
+            text=fit_button_text(g["name"], max_len=20, suffix=count),
             callback_data=f"grp:{g['id']}",
         ))
     grid_buttons(btns, kb, columns=2)
@@ -114,11 +234,11 @@ def subgroups_list(subgroups: list[dict], group_id: int) -> InlineKeyboardMarkup
     for s in subgroups:
         count = f" ({s['count']})" if s.get("count") else ""
         kb.row(InlineKeyboardButton(
-            text=f"{s['name']}{count}",
+            text=fit_button_text(s["name"], max_len=28, suffix=count),
             callback_data=f"sub:{s['id']}",
         ))
     # Also show "Все работы" to see all items in the group
-    kb.row(InlineKeyboardButton(text="📋 Все работы группы", callback_data=f"grp_items:{group_id}:1"))
+    kb.row(InlineKeyboardButton(text="📋 Все работы", callback_data=f"grp_items:{group_id}:1"))
     add_back_row(kb, "Группы", f"prof:{0}")  # will be overridden in handler
     return kb.as_markup()
 
@@ -133,11 +253,8 @@ def items_list(
     kb = InlineKeyboardBuilder()
     for item in items:
         price = f" · {item['price']:,}₽" if item.get("price") else ""
-        name = item["name"]
-        if len(name) > 30:
-            name = name[:28] + "…"
         kb.row(InlineKeyboardButton(
-            text=f"{name}{price}",
+            text=fit_button_text(item["name"], max_len=32, suffix=price),
             callback_data=f"item:{item['id']}",
         ))
     add_pagination_row(kb, page, total_pages, page_prefix)
@@ -163,11 +280,8 @@ def search_results(items: list[dict], query: str, page: int = 1, total_pages: in
     kb = InlineKeyboardBuilder()
     for item in items:
         price = f" · {item['price']:,}₽" if item.get("price") else ""
-        name = item["name"]
-        if len(name) > 30:
-            name = name[:28] + "…"
         kb.row(InlineKeyboardButton(
-            text=f"{name}{price}",
+            text=fit_button_text(item["name"], max_len=32, suffix=price),
             callback_data=f"item:{item['id']}",
         ))
     add_pagination_row(kb, page, total_pages, "search_page")
@@ -209,11 +323,24 @@ def estimate_list(estimates: list[dict], page: int = 1, total_pages: int = 1) ->
     return kb.as_markup()
 
 
-def estimate_actions(estimate_id: int, is_master: bool = False, status: str = "draft") -> InlineKeyboardMarkup:
+def estimate_actions(
+    estimate_id: int,
+    is_master: bool = False,
+    status: str = "draft",
+    capabilities: dict | None = None,
+) -> InlineKeyboardMarkup:
     """Cart-style estimate controls."""
     kb = InlineKeyboardBuilder()
+    caps = {
+        "can_edit": is_master,
+        "can_client_respond": status == "client_review",
+        "can_create_order": False,
+        "can_export": True,
+    }
+    if capabilities:
+        caps.update(capabilities)
 
-    if is_master and status == "draft":
+    if caps["can_edit"] and status == "draft":
         kb.row(
             InlineKeyboardButton(text="➕ Добавить работу", callback_data=f"est_search:{estimate_id}"),
             InlineKeyboardButton(text="🧾 Позиции", callback_data=f"est_items:{estimate_id}:1"),
@@ -227,21 +354,21 @@ def estimate_actions(estimate_id: int, is_master: bool = False, status: str = "d
             InlineKeyboardButton(text="🗑 Очистить", callback_data=f"est_clear:{estimate_id}"),
         )
 
-    if status == "client_review":
+    if status == "client_review" and caps["can_client_respond"]:
         kb.row(
             InlineKeyboardButton(text="✅ Согласовать", callback_data=f"est_approve:{estimate_id}"),
             InlineKeyboardButton(text="❌ Отклонить", callback_data=f"est_reject:{estimate_id}"),
         )
 
-    if status == "approved" and is_master:
+    if status == "approved" and caps["can_create_order"]:
         kb.row(InlineKeyboardButton(text="📝 Создать заказ", callback_data=f"est_to_order:{estimate_id}"))
 
-    # Export and QR buttons (always available)
-    kb.row(
-        InlineKeyboardButton(text="📄 PDF", callback_data=f"est_pdf:{estimate_id}"),
-        InlineKeyboardButton(text="📊 XLSX", callback_data=f"est_xlsx:{estimate_id}"),
-        InlineKeyboardButton(text="💳 QR", callback_data=f"est_qr:{estimate_id}"),
-    )
+    if caps["can_export"]:
+        kb.row(
+            InlineKeyboardButton(text="📄 PDF", callback_data=f"est_pdf:{estimate_id}"),
+            InlineKeyboardButton(text="📊 XLSX", callback_data=f"est_xlsx:{estimate_id}"),
+            InlineKeyboardButton(text="💳 QR", callback_data=f"est_qr:{estimate_id}"),
+        )
 
     add_back_row(kb, "Сметы", "my_estimates")
     return kb.as_markup()
@@ -271,12 +398,10 @@ def estimate_items_list(
     for item in items:
         qty = f"{item['quantity']}".rstrip("0").rstrip(".")
         amount = f"{item['subtotal']:,}₽".replace(",", " ")
-        name = item["name"]
-        if len(name) > 28:
-            name = name[:25] + "…"
+        suffix = f" · {qty} {item['unit']} · {amount}"
         kb.row(
             InlineKeyboardButton(
-                text=f"{name} · {qty} {item['unit']} · {amount}",
+                text=fit_button_text(item["name"], max_len=34, suffix=suffix),
                 callback_data=f"eli_view:{estimate_id}:{item['id']}",
             ),
         )
@@ -290,7 +415,13 @@ def estimate_items_list(
 # ORDERS
 # ═══════════════════════════════════════════════════════════════
 
-def order_list(orders: list[dict], page: int = 1, total_pages: int = 1) -> InlineKeyboardMarkup:
+def order_list(
+    orders: list[dict],
+    page: int = 1,
+    total_pages: int = 1,
+    *,
+    can_create: bool = False,
+) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     status_icons = {
         "draft": "📝", "submitted": "📤", "assigned": "👷",
@@ -300,32 +431,49 @@ def order_list(orders: list[dict], page: int = 1, total_pages: int = 1) -> Inlin
     for o in orders:
         icon = status_icons.get(o["status"], "📋")
         addr = f" · {o['address'][:15]}…" if o.get("address") and len(o.get("address", "")) > 15 else f" · {o.get('address', '')}" if o.get("address") else ""
+        title = fit_button_text(f"#{o['id']}", max_len=30, suffix=addr)
         kb.row(InlineKeyboardButton(
-            text=f"{icon} #{o['id']}{addr}",
+            text=f"{icon} {title}",
             callback_data=f"order_view:{o['id']}",
         ))
     add_pagination_row(kb, page, total_pages, "orders_page")
-    kb.row(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
+    if can_create:
+        kb.row(InlineKeyboardButton(text="➕ Новый заказ", callback_data="order_new"))
     add_back_row(kb, "Меню", "main_menu")
     return kb.as_markup()
 
 
-def order_actions(order_id: int, status: str, is_master: bool = False) -> InlineKeyboardMarkup:
+def order_actions(
+    order_id: int,
+    status: str,
+    is_master: bool = False,
+    capabilities: dict | None = None,
+) -> InlineKeyboardMarkup:
     """Context-aware order action buttons."""
     kb = InlineKeyboardBuilder()
+    caps = {
+        "can_submit": status == "draft",
+        "can_assign": status == "submitted" and is_master,
+        "can_start": status == "assigned" and is_master,
+        "can_complete": status == "in_progress" and is_master,
+        "can_pay": status == "completed",
+        "can_cancel": status not in ("paid", "cancelled", "completed"),
+    }
+    if capabilities:
+        caps.update(capabilities)
 
-    if status == "draft":
+    if caps["can_submit"]:
         kb.row(InlineKeyboardButton(text="📤 Отправить", callback_data=f"order_submit:{order_id}"))
-    elif status == "submitted" and is_master:
+    elif caps["can_assign"]:
         kb.row(InlineKeyboardButton(text="✋ Взять заказ", callback_data=f"order_assign:{order_id}"))
-    elif status == "assigned" and is_master:
+    elif caps["can_start"]:
         kb.row(InlineKeyboardButton(text="🔨 Начать работу", callback_data=f"order_start:{order_id}"))
-    elif status == "in_progress" and is_master:
+    elif caps["can_complete"]:
         kb.row(InlineKeyboardButton(text="✅ Завершить", callback_data=f"order_complete:{order_id}"))
-    elif status == "completed":
+    elif caps["can_pay"]:
         kb.row(InlineKeyboardButton(text="💳 Оплатить", callback_data=f"order_pay:{order_id}"))
 
-    if status not in ("paid", "cancelled", "completed"):
+    if caps["can_cancel"]:
         kb.row(InlineKeyboardButton(text="❌ Отменить", callback_data=f"order_cancel:{order_id}"))
 
     add_back_row(kb, "Заказы", "my_orders")
@@ -349,9 +497,14 @@ def approval_list(items: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for item in items:
         type_label = "%" if item["type"] == "percent" else "₽"
+        title = fit_button_text(
+            f"✅ Смета #{item['estimate_id']}",
+            max_len=32,
+            suffix=f" · {item['value']}{type_label}",
+        )
         kb.row(
             InlineKeyboardButton(
-                text=f"✅ Смета #{item['estimate_id']} · {item['value']}{type_label}",
+                text=title,
                 callback_data=f"disc_detail:{item['id']}",
             ),
         )
@@ -395,10 +548,15 @@ def admin_panel(stats: dict | None = None) -> InlineKeyboardMarkup:
 def admin_users_list(users: list[dict], page: int = 1, total_pages: int = 1) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for u in users:
-        roles_short = ", ".join(u.get("roles", []))[:20]
+        role_label = u.get("max_role_label") or u.get("primary_role") or ""
         status = "✅" if u.get("is_active") else "❌"
+        title = fit_button_text(
+            f"{status} {u['name']}",
+            max_len=34,
+            suffix=f" · {role_label}" if role_label else "",
+        )
         kb.row(InlineKeyboardButton(
-            text=f"{status} {u['name']} · {roles_short}",
+            text=title,
             callback_data=f"adm_user:{u['id']}",
         ))
     add_pagination_row(kb, page, total_pages, "adm_users_page")
@@ -406,13 +564,21 @@ def admin_users_list(users: list[dict], page: int = 1, total_pages: int = 1) -> 
     return kb.as_markup()
 
 
-def admin_user_detail(user_id: int, roles: list[str]) -> InlineKeyboardMarkup:
+def admin_user_detail(
+    user_id: int,
+    roles: list[str],
+    *,
+    can_staff: bool | None = None,
+) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
         InlineKeyboardButton(text="🔑 Роли", callback_data=f"adm_user_roles:{user_id}"),
         InlineKeyboardButton(text="🏗 Ветка", callback_data=f"adm_user_branch:{user_id}"),
     )
-    if "master" in roles or "senior_master" in roles:
+    show_staff_button = can_staff
+    if show_staff_button is None:
+        show_staff_button = any(role in roles for role in ("master", "senior_master"))
+    if show_staff_button:
         kb.row(InlineKeyboardButton(text="⚠️ Кадровое действие", callback_data=f"adm_user_staff:{user_id}"))
     add_back_row(kb, "Пользователи", "adm_users")
     return kb.as_markup()
@@ -447,13 +613,21 @@ def admin_invites_menu() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def admin_catalog_menu() -> InlineKeyboardMarkup:
+def admin_catalog_menu(professions: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.row(
-        InlineKeyboardButton(text="⚡ Электрика", callback_data="adm_cat:EL"),
-        InlineKeyboardButton(text="🔧 Сантехника", callback_data="adm_cat:PL"),
-    )
-    kb.row(InlineKeyboardButton(text="🪑 Мебель", callback_data="adm_cat:FM"))
+    buttons = []
+    for profession in professions:
+        buttons.append(
+            InlineKeyboardButton(
+                text=fit_button_text(
+                    profession["name"],
+                    max_len=22,
+                    suffix=f" ({profession['count']})" if profession.get("count") else "",
+                ),
+                callback_data=f"adm_cat:{profession['code']}",
+            )
+        )
+    grid_buttons(buttons, kb, columns=2)
     kb.row(
         InlineKeyboardButton(text="➕ Добавить работу", callback_data="adm_item_add"),
         InlineKeyboardButton(text="🔍 Найти", callback_data="adm_item_search"),

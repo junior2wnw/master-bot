@@ -58,3 +58,13 @@ migrations/versions/__pycache__/
 # Excel source data (not part of the app)
 *.xlsx
 *.docx
+
+# Local operational scratch files
+.mcp.json
+.deploy_bundle_*.tar.gz
+/_deploy.py
+/_fix_vpn.py
+/_fix_vpn2.py
+/_fix_vpn3.py
+/_fix_vpn_restore.py
+/_import_catalog.py

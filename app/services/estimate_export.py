@@ -12,8 +12,38 @@ import io
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+QR_FORMAT_PREFIX = "ST00011"
+QR_CHARSET = "cp1251"
+QR_REQUIRED_BANK_FIELDS: tuple[tuple[str, str], ...] = (
+    ("payment_recipient", "Получатель"),
+    ("settlement_account", "Расчетный счет"),
+    ("bank_name", "Банк"),
+    ("bik", "БИК"),
+    ("correspondent_account", "Корреспондентский счет"),
+)
+
+PDF_FONT_CANDIDATES: tuple[tuple[str, str, str], ...] = (
+    (
+        "DejaVuSans",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ),
+    (
+        "Arial",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+    ),
+    (
+        "Tahoma",
+        "C:/Windows/Fonts/tahoma.ttf",
+        "C:/Windows/Fonts/tahomabd.ttf",
+    ),
+)
 
 
 @dataclass
@@ -63,23 +93,61 @@ class ExportEstimate:
     client_name: str = ""
 
 
-def _build_qr_payload(profile: ExportProfile, amount: int, estimate_id: int) -> str:
-    """Build QR code payload per Russian banking standard ST-00012."""
-    parts = ["ST00012"]
-    if profile.payment_recipient:
-        parts.append(f"Name={profile.payment_recipient}")
-    if profile.settlement_account:
-        parts.append(f"PersonalAcc={profile.settlement_account}")
-    if profile.bank_name:
-        parts.append(f"BankName={profile.bank_name}")
-    if profile.bik:
-        parts.append(f"BIC={profile.bik}")
-    if profile.correspondent_account:
-        parts.append(f"CorrespAcc={profile.correspondent_account}")
-    parts.append(f"Sum={amount}00")  # kopecks
-    parts.append(f"Purpose=Оплата по смете #{estimate_id}")
-    if profile.inn:
-        parts.append(f"PayeeINN={profile.inn}")
+def _clean_qr_value(value: str | None, *, digits_only: bool = False, max_len: int | None = None) -> str:
+    if not value:
+        return ""
+    cleaned = " ".join(str(value).replace("\r", " ").replace("\n", " ").split())
+    cleaned = cleaned.replace("|", "/").replace("=", "-")
+    if digits_only:
+        cleaned = "".join(ch for ch in cleaned if ch.isdigit())
+    if max_len is not None:
+        cleaned = cleaned[:max_len]
+    return cleaned
+
+
+def get_missing_bank_qr_fields(profile: ExportProfile) -> list[str]:
+    missing: list[str] = []
+    for field, label in QR_REQUIRED_BANK_FIELDS:
+        if not _clean_qr_value(getattr(profile, field, "")):
+            missing.append(label)
+    return missing
+
+
+def has_bank_qr_details(profile: ExportProfile) -> bool:
+    return not get_missing_bank_qr_fields(profile)
+
+
+def _build_qr_payload(
+    profile: ExportProfile,
+    amount: int | None = None,
+    purpose: str | None = None,
+) -> str:
+    """Build a bank QR payload from full requisites."""
+    if not has_bank_qr_details(profile):
+        return ""
+
+    recipient = _clean_qr_value(profile.payment_recipient or profile.full_name, max_len=160)
+    settlement_account = _clean_qr_value(profile.settlement_account, digits_only=True, max_len=20)
+    bank_name = _clean_qr_value(profile.bank_name, max_len=160)
+    bik = _clean_qr_value(profile.bik, digits_only=True, max_len=9)
+    correspondent_account = _clean_qr_value(profile.correspondent_account, digits_only=True, max_len=20)
+
+    parts = [
+        QR_FORMAT_PREFIX,
+        f"Name={recipient}",
+        f"PersonalAcc={settlement_account}",
+        f"BankName={bank_name}",
+        f"BIC={bik}",
+        f"CorrespAcc={correspondent_account}",
+    ]
+    inn = _clean_qr_value(profile.inn, digits_only=True, max_len=12)
+    if inn:
+        parts.append(f"PayeeINN={inn}")
+    clean_purpose = _clean_qr_value(purpose, max_len=210)
+    if clean_purpose:
+        parts.append(f"Purpose={clean_purpose}")
+    if amount is not None:
+        parts.append(f"Sum={int(amount) * 100}")
     return "|".join(parts)
 
 
@@ -103,10 +171,10 @@ def _generate_qr_image(data: str, size: int = 180) -> bytes | None:
         qr = qrcode.QRCode(
             version=None,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
-            box_size=6,
-            border=2,
+            box_size=max(4, size // 48),
+            border=4,
         )
-        qr.add_data(data)
+        qr.add_data(data.encode(QR_CHARSET, errors="replace"))
         qr.make(fit=True)
         img = qr.make_image(image_factory=PilImage, fill_color="black", back_color="white")
 
@@ -123,6 +191,33 @@ def _money(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
 
 
+@lru_cache(maxsize=1)
+def _get_pdf_font_names() -> tuple[str, str]:
+    """Resolve a Unicode TTF family so Cyrillic renders correctly in PDF."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    registered = set(pdfmetrics.getRegisteredFontNames())
+    for family_name, regular_path_raw, bold_path_raw in PDF_FONT_CANDIDATES:
+        regular_path = Path(regular_path_raw)
+        bold_path = Path(bold_path_raw)
+        if not regular_path.exists() or not bold_path.exists():
+            continue
+
+        regular_name = f"{family_name}-UTF8"
+        bold_name = f"{family_name}-UTF8-Bold"
+        if regular_name not in registered:
+            pdfmetrics.registerFont(TTFont(regular_name, str(regular_path)))
+            registered.add(regular_name)
+        if bold_name not in registered:
+            pdfmetrics.registerFont(TTFont(bold_name, str(bold_path)))
+            registered.add(bold_name)
+        return regular_name, bold_name
+
+    logger.warning("No Unicode TTF font found for PDF export; falling back to Helvetica")
+    return "Helvetica", "Helvetica-Bold"
+
+
 # ─── PDF Export ──────────────────────────────────────────────────────────────
 
 def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
@@ -136,6 +231,7 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     )
 
     buf = io.BytesIO()
+    font_regular, font_bold = _get_pdf_font_names()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         leftMargin=15 * mm, rightMargin=15 * mm,
@@ -147,22 +243,27 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     # Custom styles
     style_title = ParagraphStyle(
         "DocTitle", parent=styles["Heading1"],
+        fontName=font_bold,
         fontSize=16, spaceAfter=4 * mm, alignment=1,  # center
     )
     style_subtitle = ParagraphStyle(
         "DocSubtitle", parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=9, textColor=colors.grey, alignment=1, spaceAfter=6 * mm,
     )
     style_header = ParagraphStyle(
         "Header", parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=9, leading=13, textColor=colors.HexColor("#333333"),
     )
     style_footer = ParagraphStyle(
         "Footer", parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=8, textColor=colors.grey, leading=11,
     )
     style_note = ParagraphStyle(
         "Note", parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=8, textColor=colors.HexColor("#666666"),
         leading=11, spaceBefore=3 * mm,
     )
@@ -230,13 +331,13 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B5797")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTSIZE", (0, 0), (-1, 0), 8),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), font_bold),
         ("ALIGN", (0, 0), (-1, 0), "CENTER"),
         ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
         ("TOPPADDING", (0, 0), (-1, 0), 4),
         # Body
         ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 1), (-1, -1), font_regular),
         ("ALIGN", (0, 1), (0, -1), "CENTER"),  # №
         ("ALIGN", (2, 1), (-1, -1), "CENTER"),  # unit+
         ("ALIGN", (-1, 1), (-1, -1), "RIGHT"),  # total
@@ -266,8 +367,9 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     totals_table = Table(totals_data, colWidths=[100 * mm, 40 * mm, 30 * mm])
     totals_table.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (0, -1), font_regular),
+        ("FONTNAME", (1, 0), (1, -1), font_bold),
+        ("FONTNAME", (2, 0), (2, -1), font_bold),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("ALIGN", (2, 0), (2, -1), "RIGHT"),
         # Last row bold and colored
@@ -279,7 +381,11 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     elements.append(totals_table)
 
     # ─── QR code + payment details ───
-    qr_payload = _build_qr_payload(profile, estimate.final, estimate.estimate_id)
+    qr_payload = _build_qr_payload(
+        profile,
+        amount=estimate.final,
+        purpose=f"Оплата по смете #{estimate.estimate_id}",
+    )
     qr_image_bytes = _generate_qr_image(qr_payload)
     has_bank_details = bool(profile.bank_name or profile.sbp_phone or profile.card_number)
 
@@ -287,7 +393,7 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
         elements.append(Spacer(1, 6 * mm))
         elements.append(Paragraph(
             "<b>РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ</b>",
-            ParagraphStyle("PayTitle", parent=styles["Normal"], fontSize=10,
+            ParagraphStyle("PayTitle", parent=styles["Normal"], fontName=font_bold, fontSize=10,
                            textColor=colors.HexColor("#2B5797"), spaceBefore=2 * mm),
         ))
         elements.append(Spacer(1, 2 * mm))
@@ -509,7 +615,11 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
         row += 1
 
     # ─── QR code image ───
-    qr_payload = _build_qr_payload(profile, estimate.final, estimate.estimate_id)
+    qr_payload = _build_qr_payload(
+        profile,
+        amount=estimate.final,
+        purpose=f"Оплата по смете #{estimate.estimate_id}",
+    )
     qr_bytes = _generate_qr_image(qr_payload, size=200)
     if qr_bytes and has_bank:
         from openpyxl.drawing.image import Image as XlImage
@@ -550,9 +660,19 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
 
 # ─── QR code generation ──────────────────────────────────────────────────────
 
-def generate_payment_qr(profile: ExportProfile, amount: int, estimate_id: int) -> dict:
+def generate_payment_qr(
+    profile: ExportProfile,
+    amount: int | None = None,
+    estimate_id: int | None = None,
+    *,
+    purpose: str | None = None,
+) -> dict:
     """Generate payment QR code and return all payment info."""
-    qr_payload = _build_qr_payload(profile, amount, estimate_id)
+    qr_payload = _build_qr_payload(
+        profile,
+        amount=amount,
+        purpose=purpose or (f"Оплата по смете #{estimate_id}" if estimate_id is not None else None),
+    )
     qr_bytes = _generate_qr_image(qr_payload)
 
     import base64
@@ -566,7 +686,10 @@ def generate_payment_qr(profile: ExportProfile, amount: int, estimate_id: int) -
         "bank": profile.bank_name,
         "account": profile.settlement_account,
         "bik": profile.bik,
+        "correspondent_account": profile.correspondent_account,
         "card": profile.card_number,
         "sbp_phone": profile.sbp_phone,
         "inn": profile.inn,
+        "has_bank_qr": bool(qr_payload and qr_base64),
+        "missing_bank_fields": get_missing_bank_qr_fields(profile),
     }

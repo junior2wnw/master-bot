@@ -35,3 +35,19 @@ def test_it_catalog_is_present_and_search_ready():
     assert item["hashtags"]
     assert item["search_text"]
     assert item["estimator_fields"]
+
+
+def test_manual_security_and_smart_home_extensions_are_present():
+    bundle = load_catalog_bundle()
+    profession_codes = {entry["code"] for entry in bundle["professions"]}
+    assert {"VS", "SH"}.issubset(profession_codes)
+
+    cctv_item = next(item for item in bundle["items"] if item["code"] == "VS-CCTV-CAM-IP-IN")
+    assert cctv_item["price_recommended"] == 2000
+    assert cctv_item["source_1"].startswith("https://")
+    assert cctv_item["estimator_fields"]
+
+    smart_home_item = next(item for item in bundle["items"] if item["code"] == "SH-SCENE-21-50")
+    assert smart_home_item["calc_strategy"] == "PACKAGE"
+    assert smart_home_item["source_1"].startswith("https://")
+    assert smart_home_item["price_updated_at"] == "2026-03-26"

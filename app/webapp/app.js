@@ -17,6 +17,42 @@ const state = {
   catalogPath: [], // breadcrumb: [{type, id, name}]
 };
 
+const ROLE_INHERITANCE = {
+  product_owner: ['admin'],
+  admin: ['senior_master'],
+  senior_master: ['master'],
+  master: [],
+  client: [],
+};
+
+const ROLE_ORDER = ['client', 'master', 'senior_master', 'admin', 'product_owner'];
+
+function effectiveRoles(roles = []) {
+  const resolved = new Set();
+  const stack = [...roles];
+
+  while (stack.length > 0) {
+    const role = stack.pop();
+    if (!role || resolved.has(role)) continue;
+    resolved.add(role);
+    (ROLE_INHERITANCE[role] || []).forEach(parent => stack.push(parent));
+  }
+
+  return resolved;
+}
+
+function hasRole(roles = [], role) {
+  return effectiveRoles(roles).has(role);
+}
+
+function highestRole(roles = []) {
+  const resolved = effectiveRoles(roles);
+  for (let i = ROLE_ORDER.length - 1; i >= 0; i -= 1) {
+    if (resolved.has(ROLE_ORDER[i])) return ROLE_ORDER[i];
+  }
+  return null;
+}
+
 // ─── Init ───────────────────────────────────────────────────
 async function init() {
   if (tg) {
@@ -29,6 +65,7 @@ async function init() {
     const initData = tg?.initData || JSON.stringify({id: 1, first_name: 'Dev', username: 'dev'});
     const res = await api('POST', '/auth', {init_data: initData});
     state.user = res;
+    applyRoleContext(res);
     setupUI();
     await loadDashboard();
   } catch (e) {
@@ -67,6 +104,23 @@ async function api(method, path, body) {
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+function applyRoleContext(context = {}) {
+  if (!state.user) return;
+  state.user = {
+    ...state.user,
+    roles: context.roles || state.user.roles || [],
+    direct_roles: context.direct_roles || state.user.direct_roles || [],
+    active_role: context.active_role ?? state.user.active_role ?? null,
+    active_role_label: context.active_role_label || state.user.active_role_label || '',
+    max_role: context.max_role ?? state.user.max_role ?? null,
+    max_role_label: context.max_role_label || state.user.max_role_label || '',
+    role_override: context.role_override ?? state.user.role_override ?? null,
+    can_switch_role: context.can_switch_role ?? state.user.can_switch_role ?? false,
+    available_roles: context.available_roles || state.user.available_roles || [],
+    is_role_switched: context.is_role_switched ?? state.user.is_role_switched ?? false,
+  };
 }
 
 // ─── Navigation ─────────────────────────────────────────────
@@ -137,14 +191,14 @@ async function loadScreen(screen, params) {
     case 'item': await loadItem(params.id); break;
     case 'notifications': await loadNotifications(); break;
     case 'profile-edit': await loadProfileEdit(); break;
-    case 'qr': await loadQR(params.estimateId); break;
+    case 'qr': await loadQR(params.estimateId, params.profile); break;
   }
 }
 
 // ─── Setup UI ───────────────────────────────────────────────
 function setupUI() {
   const roles = state.user.roles;
-  const isMaster = roles.some(r => ['master','senior_master','admin','product_owner'].includes(r));
+  const isMaster = hasRole(roles, 'master');
 
   // Show/hide tabs based on role
   if (isMaster) {
@@ -155,10 +209,12 @@ function setupUI() {
 // ─── Dashboard ──────────────────────────────────────────────
 async function loadDashboard() {
   const data = await api('GET', '/dashboard');
+  applyRoleContext(data);
   const roles = state.user.roles;
-  const isMaster = roles.some(r => ['master','senior_master','admin','product_owner'].includes(r));
-  const isAdmin = roles.some(r => ['admin','product_owner'].includes(r));
-  const isSenior = roles.includes('senior_master');
+  const primaryRole = highestRole(roles);
+  const isMaster = hasRole(roles, 'master');
+  const isAdmin = hasRole(roles, 'admin');
+  const isSenior = hasRole(roles, 'senior_master');
 
   document.getElementById('dash-name').textContent = `Привет, ${state.user.name}!`;
 
@@ -166,7 +222,8 @@ async function loadDashboard() {
     product_owner: 'Product Owner', admin: 'Администратор',
     senior_master: 'Старший мастер', master: 'Мастер', client: 'Клиент',
   };
-  document.getElementById('dash-subtitle').textContent = roles.map(r => roleLabels[r] || r).join(' · ');
+  document.getElementById('dash-subtitle').textContent =
+    data.active_role_label || state.user.active_role_label || roleLabels[primaryRole] || primaryRole || '';
 
   // Stats
   const stats = [];
@@ -471,20 +528,27 @@ async function loadEstimate(estimateId) {
 function renderEstimate(est) {
   const container = document.getElementById('estimate-detail');
   const statusLabels = {draft:'Черновик', approved:'Согласована', client_review:'На проверке', paid:'Оплачена', completed:'Завершена', master_proposed:'Предложена', in_progress:'В работе'};
-
-  const isMaster = state.user.roles.some(r => ['master','senior_master','admin','product_owner'].includes(r));
+  const caps = est.capabilities || {};
   const isDraft = est.status === 'draft';
+  const canEdit = Boolean(caps.can_edit);
+  const canSendToClient = Boolean(caps.can_send_to_client);
+  const canRequestDiscount = Boolean(caps.can_request_discount);
+  const canClientRespond = Boolean(caps.can_client_respond);
+  const canCreateOrder = Boolean(caps.can_create_order);
+  const canExport = caps.can_export !== false;
 
   let itemsHtml = '';
   if (est.items.length === 0) {
     itemsHtml = `
       <div class="empty-state">
         <p>Смета пуста</p>
-        <p class="text-muted">Добавьте работы через поиск или каталог</p>
+        <p class="text-muted">${canEdit ? 'Добавьте работы через поиск или каталог' : 'В смете пока нет позиций'}</p>
+        ${canEdit ? `
         <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
           <button class="btn btn-primary btn-sm" onclick="navigate('search')">🔍 Поиск</button>
           <button class="btn btn-secondary btn-sm" onclick="navigate('catalog')">📋 Каталог</button>
         </div>
+        ` : ''}
       </div>
     `;
   } else {
@@ -495,7 +559,7 @@ function renderEstimate(est) {
           <div class="cart-item-meta">${it.unit} × ${money(it.unit_price)}${it.coefficients ? ' ' + Object.values(it.coefficients).map(v => '×'+v).join(' ') : ''}</div>
           <div class="cart-item-price">${money(it.subtotal)}</div>
         </div>
-        ${isDraft ? `
+        ${isDraft && canEdit ? `
         <div class="cart-item-controls">
           <button class="qty-btn" onclick="changeQty(${est.id}, ${it.id}, ${it.quantity - 1})">−</button>
           <span class="qty-value">${it.quantity}</span>
@@ -514,24 +578,26 @@ function renderEstimate(est) {
   }
 
   let actionsHtml = '';
-  if (isDraft && isMaster) {
+  if (isDraft && canEdit) {
     actionsHtml = `
       <div class="cart-actions">
         <button class="btn btn-primary" onclick="navigate('search')">➕ Добавить</button>
-        <button class="btn btn-secondary" onclick="sendToClient(${est.id})">📤 Клиенту</button>
+        ${canSendToClient ? `<button class="btn btn-secondary" onclick="sendToClient(${est.id})">📤 Клиенту</button>` : ''}
       </div>
+      ${canRequestDiscount ? `
       <div class="cart-actions mt-8">
         <button class="btn btn-ghost btn-sm" onclick="requestDiscount(${est.id})">💸 Скидка</button>
       </div>
+      ` : ''}
     `;
-  } else if (est.status === 'client_review') {
+  } else if (est.status === 'client_review' && canClientRespond) {
     actionsHtml = `
       <div class="cart-actions">
         <button class="btn btn-primary" onclick="approveEstimate(${est.id})">✅ Согласовать</button>
         <button class="btn btn-danger" onclick="rejectEstimate(${est.id})">❌ Отклонить</button>
       </div>
     `;
-  } else if (est.status === 'approved' && isMaster) {
+  } else if (est.status === 'approved' && canCreateOrder) {
     actionsHtml = `
       <div class="cart-actions">
         <button class="btn btn-primary btn-block" onclick="createOrderFromEstimate(${est.id})">📝 Создать заказ</button>
@@ -539,8 +605,7 @@ function renderEstimate(est) {
     `;
   }
 
-  // Export buttons (always visible if there are items)
-  if (est.items.length > 0) {
+  if (est.items.length > 0 && canExport) {
     actionsHtml += `
       <div class="export-bar mt-12">
         <div class="export-title">Выгрузить смету</div>
@@ -695,7 +760,7 @@ async function loadOrders() {
 async function loadOrder(orderId) {
   const order = await api('GET', `/orders/${orderId}`);
   const container = document.getElementById('order-detail');
-  const isMaster = state.user.roles.some(r => ['master','senior_master','admin','product_owner'].includes(r));
+  const caps = order.capabilities || {};
 
   const statusIcons = {draft:'📝', submitted:'📤', assigned:'👷', in_progress:'🔨', completed:'✅', paid:'💰', cancelled:'❌'};
   const statusLabels = {draft:'Черновик', submitted:'Отправлен', assigned:'Назначен', in_progress:'В работе', completed:'Завершён', paid:'Оплачен', cancelled:'Отменён'};
@@ -744,17 +809,19 @@ async function loadOrder(orderId) {
 
   // Actions based on status
   let actionsHtml = '';
-  if (order.status === 'draft') {
+  if (caps.can_submit) {
     actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'submitted')">📤 Отправить заказ</button>`;
-  } else if (order.status === 'assigned' && isMaster) {
+  } else if (caps.can_assign) {
+    actionsHtml = `<button class="btn btn-primary btn-block" onclick="assignOrder(${order.id})">✋ Взять заказ</button>`;
+  } else if (caps.can_start) {
     actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'in_progress')">🔨 Начать работу</button>`;
-  } else if (order.status === 'in_progress' && isMaster) {
+  } else if (caps.can_complete) {
     actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'completed')">✅ Завершить</button>`;
-  } else if (order.status === 'completed') {
+  } else if (caps.can_pay) {
     actionsHtml = `<button class="btn btn-primary btn-block" onclick="showPayment(${order.id})">💳 Оплатить</button>`;
   }
 
-  if (['draft','submitted','assigned'].includes(order.status)) {
+  if (caps.can_cancel) {
     actionsHtml += `<button class="btn btn-ghost btn-block mt-8" onclick="updateOrderStatus(${order.id}, 'cancelled')">Отменить заказ</button>`;
   }
 
@@ -786,6 +853,14 @@ async function updateOrderStatus(orderId, status) {
   try {
     await api('POST', `/orders/${orderId}/status`, {status});
     toast('Статус обновлён');
+    await loadOrder(orderId);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function assignOrder(orderId) {
+  try {
+    await api('POST', `/orders/${orderId}/assign-self`);
+    toast('Заказ назначен вам');
     await loadOrder(orderId);
   } catch (e) { toast(e.message, true); }
 }
@@ -926,17 +1001,21 @@ async function loadAnalytics() {
 // ─── Profile ────────────────────────────────────────────────
 function loadProfile() {
   const u = state.user;
+  const primaryRole = highestRole(u.roles);
   const roleLabels = {
     product_owner: '🏢 Product Owner', admin: '⚙️ Администратор',
     senior_master: '👨‍🔧 Старший мастер', master: '🔧 Мастер', client: '👤 Клиент',
   };
 
-  const isMaster = u.roles.some(r => ['master','senior_master','admin','product_owner'].includes(r));
-  const isAdmin = u.roles.some(r => ['admin','product_owner'].includes(r));
+  const isMaster = hasRole(u.roles, 'master');
+  const isAdmin = hasRole(u.roles, 'admin');
+  const activeRoleLabel = u.active_role_label || roleLabels[primaryRole] || primaryRole || '';
+  const maxRoleLabel = u.max_role_label || activeRoleLabel;
 
   let menuItems = '';
   menuItems += profileItem('👤', 'Личные данные и реквизиты', "navigate('profile-edit')");
   if (isMaster) {
+    menuItems += profileItem('🏦', 'Мои реквизиты и QR', "navigate('qr', {profile: 1})");
     menuItems += profileItem('💰', 'Доходы', "navigate('earnings')");
     menuItems += profileItem('📊', 'Мои сметы', "navigate('estimates')");
   }
@@ -946,12 +1025,32 @@ function loadProfile() {
     menuItems += profileItem('✅', 'Согласования', "navigate('approvals')");
   }
 
+  const roleContext = u.can_switch_role ? `
+    <div class="card profile-context">
+      <div class="card-title">🎭 Режим роли</div>
+      <div class="profile-meta"><span>Сейчас</span><strong>${activeRoleLabel}</strong></div>
+      <div class="profile-meta"><span>Максимум</span><strong>${maxRoleLabel}</strong></div>
+      ${u.is_role_switched ? '<div class="profile-note">Включен временный тестовый контур прав. Прямые роли в базе не меняются.</div>' : ''}
+      <div class="role-switcher">
+        <button class="role-chip ${!u.role_override ? 'active' : ''}" onclick="setRoleMode(null)">Авто</button>
+        ${(u.available_roles || []).map(role => `
+          <button
+            class="role-chip ${u.active_role === role.code ? 'active' : ''}"
+            onclick="setRoleMode('${role.code}')"
+          >${role.label}</button>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
   document.getElementById('profile-content').innerHTML = `
     <div class="profile-header">
       <div class="profile-avatar">${u.name[0]}</div>
       <div class="profile-name">${u.name}</div>
-      <div class="profile-roles">${u.roles.map(r => roleLabels[r] || r).join(' · ')}</div>
+      <div class="profile-roles">${activeRoleLabel}</div>
+      ${u.is_role_switched ? `<div class="profile-roles">Максимальная роль: ${maxRoleLabel}</div>` : ''}
     </div>
+    ${roleContext}
     <div class="profile-menu">
       ${menuItems}
     </div>
@@ -966,6 +1065,22 @@ function profileItem(icon, label, action) {
       <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
     </div>
   `;
+}
+
+async function setRoleMode(roleCode) {
+  try {
+    const payload = await api('PUT', '/profile/role-mode', {role_code: roleCode});
+    applyRoleContext(payload);
+    setupUI();
+    if (state.screen === 'dashboard') {
+      await loadDashboard();
+    } else {
+      loadProfile();
+    }
+    toast(`Режим: ${payload.active_role_label}`);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ─── Profile Editor ─────────────────────────────────────────
@@ -1030,21 +1145,25 @@ async function saveProfile() {
 }
 
 // ─── QR Payment Viewer ─────────────────────────────────────
-async function loadQR(estimateId) {
+async function loadQR(estimateId, profileMode = false) {
   const container = document.getElementById('qr-content');
 
-  if (!estimateId) {
-    container.innerHTML = '<div class="empty-state"><p>Не выбрана смета</p></div>';
-    return;
-  }
-
   try {
-    const data = await api('GET', `/estimates/${estimateId}/qr`);
+    const data = profileMode
+      ? await api('GET', '/profile/payment-qr')
+      : await api('GET', `/estimates/${estimateId}/qr`);
+
+    const title = profileMode ? 'Мои реквизиты' : `Оплата по смете #${estimateId}`;
+    const subtitle = profileMode
+      ? 'QR без суммы: сумму можно ввести вручную в банковском приложении'
+      : `Оплата по смете #${estimateId}`;
+    const amountHtml = data.amount ? `<div class="qr-amount">${money(data.amount)}</div>` : '';
+    const missingFields = Array.isArray(data.missing_bank_fields) ? data.missing_bank_fields : [];
 
     container.innerHTML = `
       <div class="qr-viewer">
-        <div class="qr-amount">${money(data.amount)}</div>
-        <div class="qr-label">Оплата по смете #${estimateId}</div>
+        ${amountHtml}
+        <div class="qr-label">${subtitle}</div>
 
         ${data.qr_image ? `
           <div class="qr-image-wrap">
@@ -1054,15 +1173,23 @@ async function loadQR(estimateId) {
         ` : ''}
 
         <div class="card mt-12">
-          <div class="card-title">Реквизиты для оплаты</div>
+          <div class="card-title">${title}</div>
           ${data.recipient ? payRow('Получатель', data.recipient) : ''}
           ${data.bank ? payRow('Банк', data.bank) : ''}
           ${data.account ? payRow('Р/с', data.account, true) : ''}
+          ${data.correspondent_account ? payRow('Корр. счет', data.correspondent_account, true) : ''}
           ${data.bik ? payRow('БИК', data.bik, true) : ''}
           ${data.inn ? payRow('ИНН', data.inn, true) : ''}
           ${data.card ? payRow('Карта', data.card, true) : ''}
           ${data.sbp_phone ? payRow('СБП (телефон)', data.sbp_phone, true) : ''}
         </div>
+
+        ${missingFields.length ? `
+          <div class="card mt-12">
+            <div class="card-title">Что нужно заполнить для банковского QR</div>
+            <div class="text-muted">${missingFields.join(', ')}</div>
+          </div>
+        ` : ''}
 
         ${data.sbp_phone ? `
           <div class="sbp-section mt-12">
@@ -1077,7 +1204,7 @@ async function loadQR(estimateId) {
     container.innerHTML = `
       <div class="empty-state">
         <p>${e.message || 'Ошибка загрузки QR-кода'}</p>
-        <p class="text-muted">Убедитесь, что банковские реквизиты заполнены в профиле мастера</p>
+        <p class="text-muted">Убедитесь, что заполнены банковские реквизиты мастера</p>
         <button class="btn btn-primary mt-12" onclick="navigate('profile-edit')">Заполнить реквизиты</button>
       </div>
     `;

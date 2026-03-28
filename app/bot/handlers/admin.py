@@ -9,8 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
-from app.bot.ui import paginate
-from app.core.security import Role, has_role
+from app.bot.ui import fit_button_text, paginate
+from app.core.security import Role, can_manage_user, has_role, highest_role_label
 from app.models.audit import AuditLog
 from app.models.estimate import Estimate
 from app.models.feature_flag import FeatureFlag
@@ -18,17 +18,36 @@ from app.models.hierarchy import Branch, BranchMember
 from app.models.invite import Invite, InviteActivation
 from app.models.user import User, UserRole
 from app.services.auth import get_user_by_telegram_id, grant_role, revoke_role
-from app.services.invite import create_invite
+from app.services.catalog import (
+    create_service_item,
+    get_groups,
+    get_professions_with_counts,
+    get_subgroups,
+    parse_price_input,
+    update_item_prices,
+)
+from app.services.invite import approve_activation, create_invite, reject_activation
 
 router = Router()
 
 PER_PAGE = 8
+ROLE_LABELS = {
+    Role.MASTER.value: "🔧 Мастер",
+    Role.SENIOR_MASTER.value: "👨‍🔧 Ст. мастер",
+    Role.ADMIN.value: "⚙️ Админ",
+    Role.CLIENT.value: "👤 Клиент",
+}
+GRANTABLE_ROLE_CODES = frozenset(ROLE_LABELS)
+REVOCABLE_ROLE_CODES = frozenset({Role.MASTER.value, Role.SENIOR_MASTER.value, Role.ADMIN.value})
+BRANCH_ASSIGNABLE_ROLE_CODES = frozenset({Role.MASTER.value, Role.SENIOR_MASTER.value})
 
 
 class AdminStates(StatesGroup):
     creating_invite = State()
     editing_price = State()
-    adding_item = State()
+    adding_item_name = State()
+    adding_item_unit = State()
+    adding_item_prices = State()
     searching_item = State()
     branch_name = State()
     staffing_reason = State()
@@ -42,9 +61,414 @@ async def _check_admin(callback: CallbackQuery, session: AsyncSession):
     return user
 
 
+def _has_direct_role(roles: list[str], allowed_roles: set[str] | frozenset[str]) -> bool:
+    return any(role in allowed_roles for role in roles)
+
+
+async def _render_admin_catalog(callback: CallbackQuery, session: AsyncSession, *, note: str | None = None) -> None:
+    professions = await get_professions_with_counts(session)
+    text = "📋 <b>Управление каталогом</b>\n\nВыберите направление или действие:"
+    if note:
+        text += f"\n\n<i>{note}</i>"
+    await callback.message.edit_text(
+        text,
+        reply_markup=keyboards.admin_catalog_menu([
+            {
+                "id": profession["id"],
+                "code": profession.get("code"),
+                "name": profession["name"],
+                "count": profession.get("count", 0),
+            }
+            for profession in professions
+        ]),
+    )
+
+
+def _new_item_professions_markup(professions: list[dict]) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    for profession in professions:
+        kb.row(
+            InlineKeyboardButton(
+                text=fit_button_text(profession["name"], max_len=30),
+                callback_data=f"adm_item_prof:{profession['id']}",
+            )
+        )
+    kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+    return kb
+
+
 # ═══════════════════════════════════════════════════════════════
 # ADMIN PANEL
 # ═══════════════════════════════════════════════════════════════
+
+def _build_user_roles_view(target_user: User, user_id: int) -> tuple[str, InlineKeyboardBuilder]:
+    current_roles = set(target_user.role_codes)
+    current_role_list = sorted(current_roles)
+    available = sorted(GRANTABLE_ROLE_CODES - current_roles)
+
+    kb = InlineKeyboardBuilder()
+    for role in available:
+        kb.row(InlineKeyboardButton(text=f"➕ {ROLE_LABELS.get(role, role)}", callback_data=f"adm_grant:{user_id}:{role}"))
+    for role in current_role_list:
+        if role in REVOCABLE_ROLE_CODES:
+            label = ROLE_LABELS.get(role, role)
+            kb.row(InlineKeyboardButton(text=f"➖ {label}", callback_data=f"adm_revoke:{user_id}:{role}"))
+    kb.row(InlineKeyboardButton(text="← Пользователь", callback_data=f"adm_user:{user_id}"))
+
+    max_role = highest_role_label(target_user.role_codes)
+    text = f"🔑 <b>Роли пользователя</b>\n\nМаксимальная роль: <b>{max_role}</b>"
+    if current_role_list:
+        text += f"\nПрямые роли: {', '.join(current_role_list)}"
+    return text, kb
+
+
+async def _render_user_roles(message: Message, session: AsyncSession, user_id: int) -> bool:
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await message.edit_text("Пользователь не найден")
+        return False
+
+    text, kb = _build_user_roles_view(target_user, user_id)
+    await message.edit_text(text, reply_markup=kb.as_markup())
+    return True
+
+
+async def _render_user_branch(message: Message, session: AsyncSession, user_id: int) -> bool:
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await message.edit_text("Пользователь не найден")
+        return False
+
+    current_membership = (
+        await session.execute(
+            select(BranchMember).where(
+                BranchMember.user_id == user_id,
+                BranchMember.is_active,
+            )
+        )
+    ).scalar_one_or_none()
+
+    current_branch = None
+    if current_membership:
+        current_branch = (
+            await session.execute(select(Branch).where(Branch.id == current_membership.branch_id))
+        ).scalar_one_or_none()
+
+    branches = (
+        await session.execute(select(Branch).where(Branch.is_active).order_by(Branch.name))
+    ).scalars().all()
+
+    branch_line = current_branch.name if current_branch else "Не назначен, работает напрямую"
+    can_be_assigned = _has_direct_role(target_user.role_codes, BRANCH_ASSIGNABLE_ROLE_CODES)
+    text = (
+        f"🏗 <b>Назначение в ветку</b>\n\n"
+        f"Пользователь: <b>{target_user.display_name}</b>\n"
+        f"Текущая ветка: <b>{branch_line}</b>\n"
+        f"Роль: {highest_role_label(target_user.role_codes)}\n\n"
+        + (
+            "Выберите ветку ниже или снимите пользователя с текущей ветки."
+            if can_be_assigned
+            else "Назначение в ветки доступно только мастерам и старшим мастерам."
+        )
+    )
+
+    kb = InlineKeyboardBuilder()
+    if can_be_assigned:
+        for branch in branches:
+            prefix = "✅ " if current_branch and current_branch.id == branch.id else ""
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"{prefix}{branch.name}", max_len=32),
+                    callback_data=f"adm_branch_assign:{user_id}:{branch.id}",
+                )
+            )
+        if current_branch:
+            kb.row(InlineKeyboardButton(text="❌ Снять с ветки", callback_data=f"adm_branch_unassign:{user_id}"))
+    kb.row(InlineKeyboardButton(text="← Пользователь", callback_data=f"adm_user:{user_id}"))
+    await message.edit_text(text, reply_markup=kb.as_markup())
+    return True
+
+
+async def _render_pending_invites(message: Message, session: AsyncSession) -> None:
+    result = await session.execute(
+        select(InviteActivation)
+        .where(InviteActivation.status == "pending")
+        .order_by(InviteActivation.activated_at.desc())
+    )
+    activations = result.scalars().all()
+
+    kb = InlineKeyboardBuilder()
+    if not activations:
+        text = "⏳ <b>Ожидают одобрения</b>\n\nНет ожидающих."
+    else:
+        text = f"⏳ <b>Ожидают одобрения</b> ({len(activations)})\n\n"
+        for act in activations:
+            user_result = await session.execute(select(User).where(User.id == act.user_id))
+            u = user_result.scalar_one_or_none()
+            name = u.display_name if u else f"ID:{act.user_id}"
+            text += f"• {name}\n"
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"✅ {name}", max_len=28),
+                    callback_data=f"inv_approve:{act.id}",
+                ),
+                InlineKeyboardButton(
+                    text=fit_button_text(f"❌ {name}", max_len=28),
+                    callback_data=f"inv_reject:{act.id}",
+                ),
+            )
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"👤 Открыть: {name}", max_len=32),
+                    callback_data=f"inv_request:{act.id}",
+                )
+            )
+
+    kb.row(InlineKeyboardButton(text="в†ђ РРЅРІР°Р№С‚С‹", callback_data="adm_invites"))
+    await message.edit_text(text, reply_markup=kb.as_markup())
+
+
+async def _render_admin_item_detail(message: Message, session: AsyncSession, item_id: int) -> bool:
+    from app.models.catalog import ServiceItem
+
+    item = (
+        await session.execute(select(ServiceItem).where(ServiceItem.id == item_id))
+    ).scalar_one_or_none()
+    if not item:
+        await message.edit_text("Не найдено")
+        return False
+
+    status = "✅ Активна" if item.is_active else "❌ Неактивна"
+    text = (
+        f"✏️ <b>{item.name}</b>\n"
+        f"{'─' * 26}\n"
+        f"Код: <code>{item.code}</code>\n"
+        f"Цена: {item.price_min}–{item.price_max}₽, рек: <b>{item.price_recommended}₽</b>\n"
+        f"Ед.: {item.unit}\n"
+        f"Статус: {status}\n"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="💰 Цена", callback_data=f"adm_price:{item.id}"),
+        InlineKeyboardButton(
+            text="❌ Выкл" if item.is_active else "✅ Вкл",
+            callback_data=f"adm_toggle:{item.id}",
+        ),
+    )
+    kb.row(InlineKeyboardButton(text="← Группа", callback_data=f"adm_grp:{item.group_id}:1"))
+    await message.edit_text(text, reply_markup=kb.as_markup())
+    return True
+
+
+# Canonical screen renderers for state-changing callbacks.
+# They keep DB side effects separate from UI refreshes, so callback handlers
+# never need to mutate callback payloads to redraw the current screen.
+def _build_user_roles_screen(target_user: User, user_id: int) -> tuple[str, InlineKeyboardBuilder]:
+    current_roles = set(target_user.role_codes)
+    current_role_list = sorted(current_roles)
+    available = sorted(GRANTABLE_ROLE_CODES - current_roles)
+
+    kb = InlineKeyboardBuilder()
+    for role in available:
+        kb.row(
+            InlineKeyboardButton(
+                text=f"\u2795 {ROLE_LABELS.get(role, role)}",
+                callback_data=f"adm_grant:{user_id}:{role}",
+            )
+        )
+    for role in current_role_list:
+        if role in REVOCABLE_ROLE_CODES:
+            label = ROLE_LABELS.get(role, role)
+            kb.row(
+                InlineKeyboardButton(
+                    text=f"\u2796 {label}",
+                    callback_data=f"adm_revoke:{user_id}:{role}",
+                )
+            )
+    kb.row(
+        InlineKeyboardButton(
+            text="\u2190 \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c",
+            callback_data=f"adm_user:{user_id}",
+        )
+    )
+
+    max_role = highest_role_label(target_user.role_codes)
+    text = (
+        f"\U0001f511 <b>\u0420\u043e\u043b\u0438 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f</b>\n\n"
+        f"\u041c\u0430\u043a\u0441\u0438\u043c\u0430\u043b\u044c\u043d\u0430\u044f \u0440\u043e\u043b\u044c: <b>{max_role}</b>"
+    )
+    if current_role_list:
+        text += f"\n\u041f\u0440\u044f\u043c\u044b\u0435 \u0440\u043e\u043b\u0438: {', '.join(current_role_list)}"
+    return text, kb
+
+
+async def _render_user_roles_screen(message: Message, session: AsyncSession, user_id: int) -> bool:
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await message.edit_text("\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d")
+        return False
+
+    text, kb = _build_user_roles_screen(target_user, user_id)
+    await message.edit_text(text, reply_markup=kb.as_markup())
+    return True
+
+
+async def _render_user_branch_screen(message: Message, session: AsyncSession, user_id: int) -> bool:
+    target_user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not target_user:
+        await message.edit_text("\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d")
+        return False
+
+    current_membership = (
+        await session.execute(
+            select(BranchMember).where(
+                BranchMember.user_id == user_id,
+                BranchMember.is_active,
+            )
+        )
+    ).scalar_one_or_none()
+
+    current_branch = None
+    if current_membership:
+        current_branch = (
+            await session.execute(select(Branch).where(Branch.id == current_membership.branch_id))
+        ).scalar_one_or_none()
+
+    branches = (
+        await session.execute(select(Branch).where(Branch.is_active).order_by(Branch.name))
+    ).scalars().all()
+
+    branch_line = current_branch.name if current_branch else "\u041d\u0435 \u043d\u0430\u0437\u043d\u0430\u0447\u0435\u043d, \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u043d\u0430\u043f\u0440\u044f\u043c\u0443\u044e"
+    can_be_assigned = _has_direct_role(target_user.role_codes, BRANCH_ASSIGNABLE_ROLE_CODES)
+    text = (
+        f"\U0001f3d7 <b>\u041d\u0430\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0432 \u0432\u0435\u0442\u043a\u0443</b>\n\n"
+        f"\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c: <b>{target_user.display_name}</b>\n"
+        f"\u0422\u0435\u043a\u0443\u0449\u0430\u044f \u0432\u0435\u0442\u043a\u0430: <b>{branch_line}</b>\n"
+        f"\u0420\u043e\u043b\u044c: {highest_role_label(target_user.role_codes)}\n\n"
+        + (
+            "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0435\u0442\u043a\u0443 \u043d\u0438\u0436\u0435 \u0438\u043b\u0438 \u0441\u043d\u0438\u043c\u0438\u0442\u0435 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f \u0441 \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u0432\u0435\u0442\u043a\u0438."
+            if can_be_assigned
+            else "\u041d\u0430\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0432 \u0432\u0435\u0442\u043a\u0438 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u043c\u0430\u0441\u0442\u0435\u0440\u0430\u043c \u0438 \u0441\u0442\u0430\u0440\u0448\u0438\u043c \u043c\u0430\u0441\u0442\u0435\u0440\u0430\u043c."
+        )
+    )
+
+    kb = InlineKeyboardBuilder()
+    if can_be_assigned:
+        for branch in branches:
+            prefix = "\u2705 " if current_branch and current_branch.id == branch.id else ""
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"{prefix}{branch.name}", max_len=32),
+                    callback_data=f"adm_branch_assign:{user_id}:{branch.id}",
+                )
+            )
+        if current_branch:
+            kb.row(
+                InlineKeyboardButton(
+                    text="\u274c \u0421\u043d\u044f\u0442\u044c \u0441 \u0432\u0435\u0442\u043a\u0438",
+                    callback_data=f"adm_branch_unassign:{user_id}",
+                )
+            )
+    kb.row(
+        InlineKeyboardButton(
+            text="\u2190 \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c",
+            callback_data=f"adm_user:{user_id}",
+        )
+    )
+    await message.edit_text(text, reply_markup=kb.as_markup())
+    return True
+
+
+async def _render_pending_invites_screen(message: Message, session: AsyncSession) -> None:
+    result = await session.execute(
+        select(InviteActivation)
+        .where(InviteActivation.status == "pending")
+        .order_by(InviteActivation.activated_at.desc())
+    )
+    activations = result.scalars().all()
+
+    kb = InlineKeyboardBuilder()
+    if not activations:
+        text = "\u23f3 <b>\u041e\u0436\u0438\u0434\u0430\u044e\u0442 \u043e\u0434\u043e\u0431\u0440\u0435\u043d\u0438\u044f</b>\n\n\u041d\u0435\u0442 \u043e\u0436\u0438\u0434\u0430\u044e\u0449\u0438\u0445."
+    else:
+        text = f"\u23f3 <b>\u041e\u0436\u0438\u0434\u0430\u044e\u0442 \u043e\u0434\u043e\u0431\u0440\u0435\u043d\u0438\u044f</b> ({len(activations)})\n\n"
+        for act in activations:
+            user_result = await session.execute(select(User).where(User.id == act.user_id))
+            u = user_result.scalar_one_or_none()
+            name = u.display_name if u else f"ID:{act.user_id}"
+            text += f"\u2022 {name}\n"
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"\u2705 {name}", max_len=28),
+                    callback_data=f"inv_approve:{act.id}",
+                ),
+                InlineKeyboardButton(
+                    text=fit_button_text(f"\u274c {name}", max_len=28),
+                    callback_data=f"inv_reject:{act.id}",
+                ),
+            )
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"\U0001f464 \u041e\u0442\u043a\u0440\u044b\u0442\u044c: {name}", max_len=32),
+                    callback_data=f"inv_request:{act.id}",
+                )
+            )
+
+    kb.row(
+        InlineKeyboardButton(
+            text="\u2190 \u0418\u043d\u0432\u0430\u0439\u0442\u044b",
+            callback_data="adm_invites",
+        )
+    )
+    await message.edit_text(text, reply_markup=kb.as_markup())
+
+
+async def _render_admin_item_detail_screen(message: Message, session: AsyncSession, item_id: int) -> bool:
+    from app.models.catalog import ServiceItem
+
+    item = (
+        await session.execute(select(ServiceItem).where(ServiceItem.id == item_id))
+    ).scalar_one_or_none()
+    if not item:
+        await message.edit_text("\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e")
+        return False
+
+    status = "\u2705 \u0410\u043a\u0442\u0438\u0432\u043d\u0430" if item.is_active else "\u274c \u041d\u0435\u0430\u043a\u0442\u0438\u0432\u043d\u0430"
+    text = (
+        f"\u270f\ufe0f <b>{item.name}</b>\n"
+        f"{'-' * 26}\n"
+        f"\u041a\u043e\u0434: <code>{item.code}</code>\n"
+        f"\u0426\u0435\u043d\u0430: {item.price_min}\u2013{item.price_max}\u20bd, \u0440\u0435\u043a: <b>{item.price_recommended}\u20bd</b>\n"
+        f"\u0415\u0434.: {item.unit}\n"
+        f"\u0421\u0442\u0430\u0442\u0443\u0441: {status}\n"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="\U0001f4b0 \u0426\u0435\u043d\u0430", callback_data=f"adm_price:{item.id}"),
+        InlineKeyboardButton(
+            text="\u274c \u0412\u044b\u043a\u043b" if item.is_active else "\u2705 \u0412\u043a\u043b",
+            callback_data=f"adm_toggle:{item.id}",
+        ),
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="\u2190 \u0413\u0440\u0443\u043f\u043f\u0430",
+            callback_data=f"adm_grp:{item.group_id}:1",
+        )
+    )
+    await message.edit_text(text, reply_markup=kb.as_markup())
+    return True
+
 
 @router.callback_query(F.data == "admin_panel")
 async def cb_admin_panel(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -118,6 +542,7 @@ async def _show_users_page(callback, session, page):
             "id": u.id,
             "name": u.display_name,
             "roles": u.role_codes,
+            "max_role_label": highest_role_label(u.role_codes),
             "is_active": u.is_active,
         })
 
@@ -132,7 +557,8 @@ async def _show_users_page(callback, session, page):
 @router.callback_query(F.data.startswith("adm_user:"))
 async def cb_admin_user_detail(callback: CallbackQuery, session: AsyncSession) -> None:
     """Show user details with management actions."""
-    if not await _check_admin(callback, session):
+    admin = await _check_admin(callback, session)
+    if not admin:
         return
 
     user_id = int(callback.data.split(":")[1])
@@ -160,13 +586,18 @@ async def cb_admin_user_detail(callback: CallbackQuery, session: AsyncSession) -
         "telegram_id": target_user.telegram_id,
         "username": getattr(target_user, "username", None),
         "roles": target_user.role_codes,
+        "max_role_label": highest_role_label(target_user.role_codes),
         "is_active": target_user.is_active,
         "branch": branch_name,
     }
 
     await callback.message.edit_text(
         messages.admin_user_card(data),
-        reply_markup=keyboards.admin_user_detail(user_id, target_user.role_codes),
+        reply_markup=keyboards.admin_user_detail(
+            user_id,
+            target_user.role_codes,
+            can_staff=can_manage_user(admin, target_user),
+        ),
     )
     await callback.answer()
 
@@ -185,21 +616,23 @@ async def cb_admin_user_roles(callback: CallbackQuery, session: AsyncSession) ->
         return
 
     current_roles = set(target_user.role_codes)
-    all_roles = {"master", "senior_master", "admin", "client"}
-    available = list(all_roles - current_roles)
+    current_role_list = sorted(current_roles)
+    available = sorted(GRANTABLE_ROLE_CODES - current_roles)
 
     # Also show revoke options
     kb = InlineKeyboardBuilder()
     for role in available:
-        label = {"master": "🔧 Мастер", "senior_master": "👨‍🔧 Ст. мастер", "admin": "⚙️ Админ", "client": "👤 Клиент"}.get(role, role)
-        kb.row(InlineKeyboardButton(text=f"➕ {label}", callback_data=f"adm_grant:{user_id}:{role}"))
-    for role in current_roles:
-        if role != "client" and role != "product_owner":  # Don't allow revoking client or owner
-            label = {"master": "🔧 Мастер", "senior_master": "👨‍🔧 Ст. мастер", "admin": "⚙️ Админ"}.get(role, role)
+        kb.row(InlineKeyboardButton(text=f"➕ {ROLE_LABELS.get(role, role)}", callback_data=f"adm_grant:{user_id}:{role}"))
+    for role in current_role_list:
+        if role in REVOCABLE_ROLE_CODES:
+            label = ROLE_LABELS.get(role, role)
             kb.row(InlineKeyboardButton(text=f"➖ {label}", callback_data=f"adm_revoke:{user_id}:{role}"))
     kb.row(InlineKeyboardButton(text="← Пользователь", callback_data=f"adm_user:{user_id}"))
 
-    text = f"🔑 <b>Роли пользователя</b>\n\nТекущие: {', '.join(current_roles)}"
+    max_role = highest_role_label(target_user.role_codes)
+    text = f"🔑 <b>Роли пользователя</b>\n\nМаксимальная роль: <b>{max_role}</b>"
+    if current_role_list:
+        text += f"\nПрямые роли: {', '.join(current_role_list)}"
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
 
@@ -238,12 +671,12 @@ async def cb_admin_user_branch(callback: CallbackQuery, session: AsyncSession) -
     ).scalars().all()
 
     branch_line = current_branch.name if current_branch else "Не назначен, работает напрямую"
-    can_be_assigned = any(role in target_user.role_codes for role in ("master", "senior_master"))
+    can_be_assigned = _has_direct_role(target_user.role_codes, BRANCH_ASSIGNABLE_ROLE_CODES)
     text = (
         f"🏗 <b>Назначение в ветку</b>\n\n"
         f"Пользователь: <b>{target_user.display_name}</b>\n"
         f"Текущая ветка: <b>{branch_line}</b>\n"
-        f"Роли: {', '.join(target_user.role_codes)}\n\n"
+        f"Роль: {highest_role_label(target_user.role_codes)}\n\n"
         + (
             "Выберите ветку ниже или снимите пользователя с текущей ветки."
             if can_be_assigned
@@ -257,7 +690,7 @@ async def cb_admin_user_branch(callback: CallbackQuery, session: AsyncSession) -
             prefix = "✅" if current_branch and current_branch.id == branch.id else "📁"
             kb.row(
                 InlineKeyboardButton(
-                    text=f"{prefix} {branch.name}",
+                    text=fit_button_text(f"{prefix} {branch.name}", max_len=32),
                     callback_data=f"adm_branch_assign:{user_id}:{branch.id}",
                 ),
             )
@@ -286,7 +719,7 @@ async def cb_admin_assign_branch(callback: CallbackQuery, session: AsyncSession)
     if not target_user or not branch:
         await callback.answer("Ветка или пользователь не найдены", show_alert=True)
         return
-    if not any(role in target_user.role_codes for role in ("master", "senior_master")):
+    if not _has_direct_role(target_user.role_codes, BRANCH_ASSIGNABLE_ROLE_CODES):
         await callback.answer("В ветки можно назначать только мастеров", show_alert=True)
         return
 
@@ -309,7 +742,7 @@ async def cb_admin_assign_branch(callback: CallbackQuery, session: AsyncSession)
             if old_branch.senior_master_id == target_user.id:
                 old_branch.senior_master_id = None
 
-    is_senior = "senior_master" in target_user.role_codes
+    is_senior = Role.SENIOR_MASTER.value in target_user.role_codes
     session.add(BranchMember(
         branch_id=branch.id,
         user_id=target_user.id,
@@ -331,8 +764,7 @@ async def cb_admin_assign_branch(callback: CallbackQuery, session: AsyncSession)
     )
 
     await callback.answer(f"✅ {target_user.display_name} назначен в ветку {branch.name}", show_alert=True)
-    callback.data = f"adm_user_branch:{user_id}"
-    await cb_admin_user_branch(callback, session)
+    await _render_user_branch_screen(callback.message, session, user_id)
 
 
 @router.callback_query(F.data.regexp(r"^adm_branch_unassign:(\d+)$"))
@@ -379,8 +811,7 @@ async def cb_admin_unassign_branch(callback: CallbackQuery, session: AsyncSessio
     )
 
     await callback.answer(f"✅ {target_user.display_name} снят с ветки", show_alert=True)
-    callback.data = f"adm_user_branch:{user_id}"
-    await cb_admin_user_branch(callback, session)
+    await _render_user_branch_screen(callback.message, session, user_id)
 
 
 @router.callback_query(F.data.startswith("adm_user_staff:"))
@@ -460,7 +891,7 @@ async def msg_admin_staff_reason(message: Message, state: FSMContext, session: A
         await state.clear()
         return
 
-    from app.services.staffing import initiate_action
+    from app.services.staffing import initiate_action, staffing_status_label
 
     action = await initiate_action(
         session,
@@ -471,10 +902,7 @@ async def msg_admin_staff_reason(message: Message, state: FSMContext, session: A
     )
     await state.clear()
 
-    status_label = {
-        "executed": "выполнено сразу",
-        "pending": "отправлено на подтверждение",
-    }.get(action.status, action.status)
+    status_label = staffing_status_label(action.status)
     await message.answer(
         f"✅ Кадровое действие создано.\n"
         f"Тип: <b>{action.action_type}</b>\n"
@@ -498,10 +926,27 @@ async def cb_admin_grant_role(callback: CallbackQuery, session: AsyncSession) ->
 
     await grant_role(session, user=target_user, role_code=role_code, granted_by=admin.id)
     await callback.answer(f"✅ Роль {role_code} назначена!", show_alert=True)
+    await _render_user_roles_screen(callback.message, session, user_id)
+    return
 
-    # Refresh the roles screen
-    callback.data = f"adm_user_roles:{user_id}"
-    await cb_admin_user_roles(callback, session)
+    current_roles = set(target_user.role_codes)
+    current_role_list = sorted(current_roles)
+    available = sorted(GRANTABLE_ROLE_CODES - current_roles)
+
+    kb = InlineKeyboardBuilder()
+    for role in available:
+        kb.row(InlineKeyboardButton(text=f"➕ {ROLE_LABELS.get(role, role)}", callback_data=f"adm_grant:{user_id}:{role}"))
+    for role in current_role_list:
+        if role in REVOCABLE_ROLE_CODES:
+            label = ROLE_LABELS.get(role, role)
+            kb.row(InlineKeyboardButton(text=f"➖ {label}", callback_data=f"adm_revoke:{user_id}:{role}"))
+    kb.row(InlineKeyboardButton(text="← Пользователь", callback_data=f"adm_user:{user_id}"))
+
+    max_role = highest_role_label(target_user.role_codes)
+    text = f"🔑 <b>Роли пользователя</b>\n\nМаксимальная роль: <b>{max_role}</b>"
+    if current_role_list:
+        text += f"\nПрямые роли: {', '.join(current_role_list)}"
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(F.data.regexp(r"^adm_revoke:(\d+):(\w+)$"))
@@ -520,8 +965,7 @@ async def cb_admin_revoke_role(callback: CallbackQuery, session: AsyncSession) -
     await revoke_role(session, user=target_user, role_code=role_code, revoked_by=admin.id)
     await callback.answer(f"❌ Роль {role_code} отозвана", show_alert=True)
 
-    callback.data = f"adm_user_roles:{user_id}"
-    await cb_admin_user_roles(callback, session)
+    await _render_user_roles_screen(callback.message, session, user_id)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -610,11 +1054,64 @@ async def cb_invite_pending(callback: CallbackQuery, session: AsyncSession) -> N
             name = u.display_name if u else f"ID:{act.user_id}"
             text += f"• {name}\n"
             kb.row(
-                InlineKeyboardButton(text=f"✅ {name}", callback_data=f"inv_approve:{act.id}"),
-                InlineKeyboardButton(text=f"❌ {name}", callback_data=f"inv_reject:{act.id}"),
+                InlineKeyboardButton(
+                    text=fit_button_text(f"✅ {name}", max_len=28),
+                    callback_data=f"inv_approve:{act.id}",
+                ),
+                InlineKeyboardButton(
+                    text=fit_button_text(f"❌ {name}", max_len=28),
+                    callback_data=f"inv_reject:{act.id}",
+                ),
+            )
+            kb.row(
+                InlineKeyboardButton(
+                    text=fit_button_text(f"👤 Открыть: {name}", max_len=32),
+                    callback_data=f"inv_request:{act.id}",
+                )
             )
 
     kb.row(InlineKeyboardButton(text="← Инвайты", callback_data="adm_invites"))
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("inv_request:"))
+async def cb_invite_request_detail(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    activation_id = int(callback.data.split(":")[1])
+    activation = (
+        await session.execute(select(InviteActivation).where(InviteActivation.id == activation_id))
+    ).scalar_one_or_none()
+    if not activation:
+        await callback.answer("Запрос не найден", show_alert=True)
+        return
+
+    invite = (
+        await session.execute(select(Invite).where(Invite.id == activation.invite_id))
+    ).scalar_one_or_none()
+    target_user = (
+        await session.execute(select(User).where(User.id == activation.user_id))
+    ).scalar_one_or_none()
+    if not invite or not target_user:
+        await callback.answer("Запрос поврежден", show_alert=True)
+        return
+
+    text = (
+        "👥 <b>Запрос на роль</b>\n\n"
+        f"Пользователь: <b>{target_user.display_name}</b>\n"
+        f"Роль: <b>{ROLE_LABELS.get(invite.role_code, invite.role_code)}</b>\n"
+        f"Статус: <b>{activation.status}</b>\n"
+        f"Код инвайта: <code>{invite.code}</code>"
+    )
+    kb = InlineKeyboardBuilder()
+    if activation.status == "pending":
+        kb.row(
+            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"inv_approve:{activation.id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"inv_reject:{activation.id}"),
+        )
+    kb.row(InlineKeyboardButton(text="← К запросам", callback_data="inv_pending"))
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
 
@@ -626,32 +1123,16 @@ async def cb_approve_invite(callback: CallbackQuery, session: AsyncSession) -> N
         return
 
     activation_id = int(callback.data.split(":")[1])
-    result = await session.execute(
-        select(InviteActivation).where(InviteActivation.id == activation_id)
-    )
-    activation = result.scalar_one_or_none()
-    if not activation:
-        await callback.answer("Не найдено", show_alert=True)
+    try:
+        await approve_activation(session, activation_id=activation_id, approver=admin)
+    except Exception as exc:
+        await callback.answer(f"⚠️ {exc}", show_alert=True)
         return
 
-    activation.status = "approved"
-    activation.approved_by = admin.id
-
-    # Grant the role from the invite
-    inv_result = await session.execute(select(Invite).where(Invite.id == activation.invite_id))
-    invite = inv_result.scalar_one_or_none()
-    if invite and invite.role_code:
-        user_result = await session.execute(select(User).where(User.id == activation.user_id))
-        target_user = user_result.scalar_one_or_none()
-        if target_user:
-            await grant_role(session, user=target_user, role_code=invite.role_code, granted_by=admin.id)
-
-    await session.flush()
     await callback.answer("✅ Одобрено!", show_alert=True)
 
     # Refresh pending list
-    callback.data = "inv_pending"
-    await cb_invite_pending(callback, session)
+    await _render_pending_invites_screen(callback.message, session)
 
 
 @router.callback_query(F.data.startswith("inv_reject:"))
@@ -661,18 +1142,14 @@ async def cb_reject_invite(callback: CallbackQuery, session: AsyncSession) -> No
         return
 
     activation_id = int(callback.data.split(":")[1])
-    result = await session.execute(
-        select(InviteActivation).where(InviteActivation.id == activation_id)
-    )
-    activation = result.scalar_one_or_none()
-    if activation:
-        activation.status = "rejected"
-        activation.approved_by = admin.id
-        await session.flush()
+    try:
+        await reject_activation(session, activation_id=activation_id, approver=admin)
+    except Exception as exc:
+        await callback.answer(f"⚠️ {exc}", show_alert=True)
+        return
 
     await callback.answer("❌ Отклонено", show_alert=True)
-    callback.data = "inv_pending"
-    await cb_invite_pending(callback, session)
+    await _render_pending_invites_screen(callback.message, session)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -683,9 +1160,18 @@ async def cb_reject_invite(callback: CallbackQuery, session: AsyncSession) -> No
 async def cb_admin_catalog(callback: CallbackQuery, session: AsyncSession) -> None:
     if not await _check_admin(callback, session):
         return
-    await callback.message.edit_text(
-        "📋 <b>Управление каталогом</b>\n\nВыберите направление или действие:",
-        reply_markup=keyboards.admin_catalog_menu(),
+    await _render_admin_catalog(callback, session)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm_prices")
+async def cb_admin_prices(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+    await _render_admin_catalog(
+        callback,
+        session,
+        note="Цена и создание новых работ теперь доступны прямо здесь: поиск, карточка работы и мастер добавления.",
     )
     await callback.answer()
 
@@ -732,8 +1218,12 @@ async def msg_admin_item_search(message: Message, state: FSMContext, session: As
 
     for item in items:
         price = f" · {item.price_recommended:,}₽".replace(",", " ") if item.price_recommended else ""
-        title = item.name[:34] + "…" if len(item.name) > 35 else item.name
-        kb.row(InlineKeyboardButton(text=f"✏️ {title}{price}", callback_data=f"adm_item:{item.id}"))
+        kb.row(
+            InlineKeyboardButton(
+                text=fit_button_text(f"✏️ {item.name}", max_len=34, suffix=price),
+                callback_data=f"adm_item:{item.id}",
+            )
+        )
     kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
     await message.answer(
         f"🔍 Найдено: <b>{len(items)}</b>\n"
@@ -744,24 +1234,171 @@ async def msg_admin_item_search(message: Message, state: FSMContext, session: As
 
 
 @router.callback_query(F.data == "adm_item_add")
-async def cb_admin_item_add(callback: CallbackQuery, session: AsyncSession) -> None:
+async def cb_admin_item_add(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     if not await _check_admin(callback, session):
         return
 
-    kb = InlineKeyboardBuilder()
-    kb.row(
-        InlineKeyboardButton(text="🔍 Найти и отредактировать", callback_data="adm_item_search"),
-        InlineKeyboardButton(text="📱 Открыть приложение", callback_data="open_webapp"),
-    )
-    kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+    await state.clear()
+    professions = await get_professions_with_counts(session)
     await callback.message.edit_text(
-        "➕ <b>Новая работа</b>\n\n"
-        "В боте уже доступно быстрое редактирование существующего каталога: цены, активность и поиск.\n"
-        "Полное создание новой карточки лучше делать в Mini App, чтобы не потерять важные поля каталога:\n"
-        "профессию, группу, подгруппу, unit, alias, hashtags и правила поиска.",
+        "➕ <b>Новая работа</b>\n\nВыберите направление. Дальше бот по шагам спросит группу, подгруппу, название, единицу измерения и цену.",
+        reply_markup=_new_item_professions_markup(professions).as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_item_prof:"))
+async def cb_admin_item_profession(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    profession_id = int(callback.data.split(":")[1])
+    groups = await get_groups(session, profession_id)
+    if not groups:
+        await callback.answer("В этом направлении пока нет групп", show_alert=True)
+        return
+
+    await state.update_data(new_item_profession_id=profession_id)
+    kb = InlineKeyboardBuilder()
+    for group in groups:
+        kb.row(
+            InlineKeyboardButton(
+                text=fit_button_text(group.name, max_len=32),
+                callback_data=f"adm_item_group:{group.id}",
+            )
+        )
+    kb.row(InlineKeyboardButton(text="← Направления", callback_data="adm_item_add"))
+    await callback.message.edit_text(
+        "➕ <b>Новая работа</b>\n\nШаг 2 из 5. Выберите группу.",
         reply_markup=kb.as_markup(),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_item_group:"))
+async def cb_admin_item_group(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    group_id = int(callback.data.split(":")[1])
+    subgroups = await get_subgroups(session, group_id)
+    await state.update_data(new_item_group_id=group_id)
+
+    if not subgroups:
+        await state.update_data(new_item_subgroup_id=None)
+        await state.set_state(AdminStates.adding_item_name)
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+        await callback.message.edit_text(
+            "➕ <b>Новая работа</b>\n\nШаг 3 из 5. Введите название работы.",
+            reply_markup=kb.as_markup(),
+        )
+        await callback.answer()
+        return
+
+    kb = InlineKeyboardBuilder()
+    for subgroup in subgroups:
+        kb.row(
+            InlineKeyboardButton(
+                text=fit_button_text(subgroup.name, max_len=32),
+                callback_data=f"adm_item_sub:{subgroup.id}",
+            )
+        )
+    kb.row(InlineKeyboardButton(text="Без подгруппы", callback_data="adm_item_sub:0"))
+    kb.row(InlineKeyboardButton(text="← Группы", callback_data="adm_item_add"))
+    await callback.message.edit_text(
+        "➕ <b>Новая работа</b>\n\nШаг 3 из 5. Выберите подгруппу или создайте работу без нее.",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_item_sub:"))
+async def cb_admin_item_subgroup(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not await _check_admin(callback, session):
+        return
+
+    subgroup_id = int(callback.data.split(":")[1])
+    await state.update_data(new_item_subgroup_id=subgroup_id or None)
+    await state.set_state(AdminStates.adding_item_name)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Каталог", callback_data="adm_catalog"))
+    await callback.message.edit_text(
+        "➕ <b>Новая работа</b>\n\nШаг 4 из 5. Введите название работы.",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.adding_item_name)
+async def msg_admin_item_name(message: Message, state: FSMContext) -> None:
+    name = " ".join((message.text or "").split())
+    if len(name) < 4:
+        await message.answer("⚠️ Название слишком короткое. Нужны хотя бы 4 символа.")
+        return
+
+    await state.update_data(new_item_name=name)
+    await state.set_state(AdminStates.adding_item_unit)
+    await message.answer(
+        "Шаг 5 из 5. Введите единицу измерения.\n\nПримеры: <code>шт</code>, <code>м.п.</code>, <code>усл.</code>, <code>компл.</code>."
+    )
+
+
+@router.message(AdminStates.adding_item_unit)
+async def msg_admin_item_unit(message: Message, state: FSMContext) -> None:
+    unit = " ".join((message.text or "").split())
+    if len(unit) < 1 or len(unit) > 30:
+        await message.answer("⚠️ Единица измерения должна быть короче 30 символов.")
+        return
+
+    await state.update_data(new_item_unit=unit)
+    await state.set_state(AdminStates.adding_item_prices)
+    await message.answer(
+        "Введите цену.\n"
+        "Можно одним числом: <code>2500</code>\n"
+        "Или тремя числами: <code>2000 2500 3000</code> (мин рекомендованная макс)."
+    )
+
+
+@router.message(AdminStates.adding_item_prices)
+async def msg_admin_item_prices(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    profession_id = data.get("new_item_profession_id")
+    group_id = data.get("new_item_group_id")
+    name = data.get("new_item_name")
+    unit = data.get("new_item_unit")
+    if not profession_id or not group_id or not name or not unit:
+        await state.clear()
+        await message.answer("⚠️ Сценарий создания сброшен. Откройте каталог и начните снова.")
+        return
+
+    try:
+        price_min, price_recommended, price_max = parse_price_input(message.text or "")
+    except Exception as exc:
+        await message.answer(f"⚠️ {exc}")
+        return
+
+    admin = await get_user_by_telegram_id(session, message.from_user.id)
+    item = await create_service_item(
+        session,
+        profession_id=profession_id,
+        group_id=group_id,
+        subgroup_id=data.get("new_item_subgroup_id"),
+        name=name,
+        unit=unit,
+        price_min=price_min,
+        price_recommended=price_recommended,
+        price_max=price_max,
+        actor_id=admin.id if admin else None,
+    )
+    await state.clear()
+    await message.answer(
+        "✅ Работа добавлена.\n"
+        f"Код: <code>{item.code}</code>\n"
+        f"Название: <b>{item.name}</b>\n"
+        f"Цена: {item.price_min}–{item.price_max}₽, рек. <b>{item.price_recommended}₽</b>",
+    )
 
 
 @router.callback_query(F.data.startswith("adm_cat:"))
@@ -791,7 +1428,7 @@ async def cb_admin_catalog_prof(callback: CallbackQuery, session: AsyncSession) 
         )).scalar() or 0
         text += f"• {g.name}: {count} работ\n"
         kb.row(InlineKeyboardButton(
-            text=f"✏️ {g.name} ({count})",
+            text=fit_button_text(f"✏️ {g.name}", max_len=30, suffix=f" ({count})"),
             callback_data=f"adm_grp:{g.id}:1",
         ))
 
@@ -821,9 +1458,12 @@ async def cb_admin_group_items(callback: CallbackQuery, session: AsyncSession) -
     kb = InlineKeyboardBuilder()
     for it in page_items:
         status = "✅" if it["active"] else "❌"
-        name = it["name"][:25] + "…" if len(it["name"]) > 27 else it["name"]
         kb.row(InlineKeyboardButton(
-            text=f"{status} {name} · {it['price']:,}₽",
+            text=fit_button_text(
+                f"{status} {it['name']}",
+                max_len=34,
+                suffix=f" · {it['price']:,}₽".replace(",", " "),
+            ),
             callback_data=f"adm_item:{it['id']}",
         ))
     from app.bot.ui import add_pagination_row
@@ -891,7 +1531,9 @@ async def cb_admin_edit_price(callback: CallbackQuery, state: FSMContext, sessio
     kb.row(InlineKeyboardButton(text="← Отмена", callback_data=f"adm_item:{item_id}"))
 
     await callback.message.edit_text(
-        "💰 Введите новую рекомендованную цену (число):",
+        "💰 Введите цену.\n"
+        "Можно одним числом: <code>2500</code>\n"
+        "Или тремя числами: <code>2000 2500 3000</code> (мин рекомендованная макс).",
         reply_markup=kb.as_markup(),
     )
     await callback.answer()
@@ -906,29 +1548,30 @@ async def msg_edit_price(message: Message, state: FSMContext, session: AsyncSess
         return
 
     try:
-        new_price = int(message.text.strip())
-        if new_price <= 0:
-            raise ValueError
-    except ValueError:
-        await message.answer("⚠️ Введите положительное число.")
+        price_min, price_recommended, price_max = parse_price_input(message.text or "")
+    except Exception as exc:
+        await message.answer(f"⚠️ {exc}")
         return
 
     from app.models.catalog import ServiceItem
     result = await session.execute(select(ServiceItem).where(ServiceItem.id == item_id))
     item = result.scalar_one_or_none()
     if item:
-        from app.core.audit import log_audit
         admin = await get_user_by_telegram_id(session, message.from_user.id)
-        old_price = item.price_recommended
-        item.price_recommended = new_price
-        await session.flush()
-        await log_audit(
-            session, user_id=admin.id, action="catalog.price_changed",
-            entity_type="service_item", entity_id=item.id,
-            old_value={"price_recommended": old_price},
-            new_value={"price_recommended": new_price},
+        old_value = (item.price_min, item.price_recommended, item.price_max)
+        await update_item_prices(
+            session,
+            item=item,
+            price_min=price_min,
+            price_recommended=price_recommended,
+            price_max=price_max,
+            actor_id=admin.id if admin else None,
         )
-        await message.answer(f"✅ Цена изменена: {old_price}₽ → {new_price}₽")
+        await message.answer(
+            "✅ Цена изменена.\n"
+            f"Было: {old_value[0]}–{old_value[2]}₽, рек. {old_value[1]}₽\n"
+            f"Стало: {item.price_min}–{item.price_max}₽, рек. <b>{item.price_recommended}₽</b>"
+        )
     else:
         await message.answer("⚠️ Работа не найдена")
 
@@ -951,8 +1594,7 @@ async def cb_admin_toggle_item(callback: CallbackQuery, session: AsyncSession) -
         status = "активирована" if item.is_active else "деактивирована"
         await callback.answer(f"{'✅' if item.is_active else '❌'} Работа {status}", show_alert=True)
 
-    callback.data = f"adm_item:{item_id}"
-    await cb_admin_item_detail(callback, session)
+    await _render_admin_item_detail_screen(callback.message, session, item_id)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -977,7 +1619,7 @@ async def cb_admin_branches(callback: CallbackQuery, session: AsyncSession) -> N
         )).scalar() or 0
         text += f"• {b.name}: {members_count} мастеров\n"
         kb.row(InlineKeyboardButton(
-            text=f"📂 {b.name} ({members_count})",
+            text=fit_button_text(f"📂 {b.name}", max_len=30, suffix=f" ({members_count})"),
             callback_data=f"adm_branch:{b.id}",
         ))
 
@@ -1066,9 +1708,8 @@ async def cb_admin_branch_detail(callback: CallbackQuery, session: AsyncSession)
 
 @router.callback_query(F.data == "adm_flags")
 async def cb_admin_flags(callback: CallbackQuery, session: AsyncSession) -> None:
-    user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user or not (has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER)):
-        await callback.answer("Нет доступа", show_alert=True)
+    user = await _check_admin(callback, session)
+    if not user:
         return
 
     result = await session.execute(select(FeatureFlag).order_by(FeatureFlag.code))
@@ -1095,8 +1736,8 @@ async def cb_admin_flags(callback: CallbackQuery, session: AsyncSession) -> None
 async def cb_toggle_flag(callback: CallbackQuery, session: AsyncSession) -> None:
     parts = callback.data.split(":")
     code, action = parts[1], parts[2]
-    user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user or not (has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER)):
+    user = await _check_admin(callback, session)
+    if not user:
         return
 
     from app.core.module_registry import set_flag
@@ -1111,9 +1752,8 @@ async def cb_toggle_flag(callback: CallbackQuery, session: AsyncSession) -> None
 
 @router.callback_query(F.data == "adm_audit")
 async def cb_admin_audit(callback: CallbackQuery, session: AsyncSession) -> None:
-    user = await get_user_by_telegram_id(session, callback.from_user.id)
-    if not user or not (has_role(user, Role.ADMIN) or has_role(user, Role.PRODUCT_OWNER)):
-        await callback.answer("Нет доступа", show_alert=True)
+    user = await _check_admin(callback, session)
+    if not user:
         return
 
     result = await session.execute(
@@ -1167,6 +1807,7 @@ async def cb_admin_staffing(callback: CallbackQuery, session: AsyncSession) -> N
     if not await _check_admin(callback, session):
         return
     from app.models.staffing import StaffingAction
+    from app.services.staffing import staffing_status_label
     result = await session.execute(
         select(StaffingAction).order_by(StaffingAction.created_at.desc()).limit(10)
     )
@@ -1177,7 +1818,9 @@ async def cb_admin_staffing(callback: CallbackQuery, session: AsyncSession) -> N
         lines.append("Нет записей.")
     else:
         for a in actions:
-            lines.append(f"• {a.action_type} — пользователь #{a.target_user_id} ({a.status})")
+            lines.append(
+                f"• {a.action_type} — пользователь #{a.target_user_id} ({staffing_status_label(a.status)})"
+            )
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="← Админ", callback_data="admin_panel"))
@@ -1185,22 +1828,16 @@ async def cb_admin_staffing(callback: CallbackQuery, session: AsyncSession) -> N
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"adm_prices", "adm_notifications"}))
+@router.callback_query(F.data == "adm_notifications")
 async def cb_admin_stub(callback: CallbackQuery, session: AsyncSession) -> None:
     if not await _check_admin(callback, session):
         return
-
-    labels = {
-        "adm_prices": "💰 Управление ценами",
-        "adm_notifications": "🔔 Уведомления",
-    }
-    label = labels.get(callback.data, "Раздел")
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="📱 Открыть в приложении", callback_data="open_webapp"))
     kb.row(InlineKeyboardButton(text="← Админ", callback_data="admin_panel"))
     await callback.message.edit_text(
-        f"{label}\n\n<i>Полное управление доступно в Mini App.</i>",
+        "🔔 Уведомления\n\n<i>Полное управление шаблонами уведомлений пока доступно в Mini App.</i>",
         reply_markup=kb.as_markup(),
     )
     await callback.answer()

@@ -83,6 +83,25 @@ def money(amount: int | float) -> str:
     return f"{int(amount):,}₽".replace(",", " ")
 
 
+def fit_button_text(
+    label: str,
+    *,
+    max_len: int = 30,
+    suffix: str = "",
+) -> str:
+    """Trim dynamic button text while preserving the suffix."""
+    clean = " ".join((label or "").split())
+    if not clean:
+        return suffix[:max_len]
+    budget = max_len - len(suffix)
+    if budget < 4:
+        budget = max_len
+        suffix = ""
+    if len(clean) > budget:
+        clean = clean[: budget - 1].rstrip(" .,;:/-") + "…"
+    return f"{clean}{suffix}"
+
+
 def badge(status: str, mapping: dict[str, str]) -> str:
     """Get emoji badge for status."""
     return mapping.get(status, "○")
