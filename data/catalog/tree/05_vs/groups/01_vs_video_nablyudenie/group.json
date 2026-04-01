@@ -1,0 +1,7 @@
+{
+  "code": "vs_video_nablyudenie",
+  "profession_code": "VS",
+  "name": "Видеонаблюдение",
+  "sort_priority": 1,
+  "is_active": true
+}

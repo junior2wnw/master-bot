@@ -1,0 +1,626 @@
+[
+  {
+    "code": "#APPLIANCE_BUILTIN_ACCESS",
+    "name": "Доступ к встроенной технике",
+    "description": "Аккуратное извлечение встроенной техники, частичный разбор мебели и обратная установка.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#APPLIANCE_CLEANING",
+    "name": "Профилактическая чистка техники",
+    "description": "Промывка, очистка узлов, удаление загрязнений и накипи без стоимости расходников.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#APPLIANCE_DIAGNOSTICS",
+    "name": "Диагностика бытовой техники",
+    "description": "Диагностика на выезде или в разборе для бытовой техники и сложных приборов.",
+    "typical_unit": "усл.",
+    "pricing_strategy": "service",
+    "is_active": true
+  },
+  {
+    "code": "#APPLIANCE_REPAIR",
+    "name": "Ремонт бытовой техники",
+    "description": "Типовой ремонт техники без стоимости запчастей и редких нестандартных работ.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#ASSEMBLE_PANEL",
+    "name": "Сборка и расключение щита",
+    "description": "Сборка модульного щита, расключение автоматов, УЗО, реле и шинки.",
+    "typical_unit": "щит",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#ASSEMBLY",
+    "name": "Сборка изделия",
+    "description": "Сборка мебели/узла/корпуса из комплекта",
+    "typical_unit": "шт/компл.",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#CALL_OUT",
+    "name": "Выезд мастера",
+    "description": "Первичный выезд к клиенту; может быть бесплатным при заказе",
+    "typical_unit": "усл.",
+    "pricing_strategy": "service/info",
+    "is_active": true
+  },
+  {
+    "code": "#CONNECT_APPLIANCE",
+    "name": "Подключение электроприбора",
+    "description": "Электрическое подключение готового прибора к существующей линии и точке питания.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#CONTROL_BOARD_REPAIR",
+    "name": "Ремонт модуля или платы",
+    "description": "Работы по восстановлению платы управления, силового модуля и электроники.",
+    "typical_unit": "узел",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#CONTROL_DEVICE",
+    "name": "?????? ???????????? ??????????",
+    "description": "??????, ?????????, ?????????? ? ???? ?????? ??????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#CUT_COUNTERTOP",
+    "name": "Рез/вырез в столешнице",
+    "description": "Прямой рез, вырез под мойку/варочную панель",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#CUT_PANEL",
+    "name": "Подрезка панели/экрана",
+    "description": "Подгонка экрана, цоколя, панели, мебельной детали",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#DEMO_FIXTURE",
+    "name": "Демонтаж прибора/изделия",
+    "description": "Снятие смесителя, ванны, унитаза, мебели и т.п.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#DEMO_PIPE",
+    "name": "Демонтаж трубы/коммуникации",
+    "description": "Снятие старых труб/канализации",
+    "typical_unit": "м.п./шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#DIAG_ONSITE",
+    "name": "Выездная диагностика",
+    "description": "Осмотр, первичная диагностика, дефектовка",
+    "typical_unit": "усл.",
+    "pricing_strategy": "service",
+    "is_active": true
+  },
+  {
+    "code": "#DISASSEMBLY",
+    "name": "Разборка мебели",
+    "description": "Обратная операция сборке",
+    "typical_unit": "шт/час/компл.",
+    "pricing_strategy": "per_unit/hourly",
+    "is_active": true
+  },
+  {
+    "code": "#DRILL_HOLE",
+    "name": "Сверление отверстия",
+    "description": "Отверстия в стене/мойке/столешнице/основании",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#ELECTRIC_CONNECT",
+    "name": "Электроподключение прибора",
+    "description": "Операция, где сантехника/мебель пересекается с электрикой",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#HEAVY_LIFT",
+    "name": "Тяжелый подъем/масса",
+    "description": "Повышающий фактор для тяжелых изделий",
+    "typical_unit": "коэф.",
+    "pricing_strategy": "coefficient",
+    "is_active": true
+  },
+  {
+    "code": "#HOURLY_WORK",
+    "name": "Почасовая работа",
+    "description": "Нестандартные и мелкие работы вне каталожных позиций",
+    "typical_unit": "час",
+    "pricing_strategy": "hourly",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_APPLIANCE",
+    "name": "Подключение прибора",
+    "description": "Стиральные/посудомоечные машины и прочие приборы",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_BATH",
+    "name": "Установка ванны",
+    "description": "Ванны разных типов",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_BIDET",
+    "name": "Установка биде",
+    "description": "Напольные/подвесные биде и инсталляции",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_BOX",
+    "name": "?????? ???????/????????????",
+    "description": "????????? ????????? ???????, ???????????? ??? ???????????? ?????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_CHANDELIER",
+    "name": "Монтаж люстры",
+    "description": "Отдельный класс светотехники по весу и сложности",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_DRAIN",
+    "name": "Монтаж канализации/слива",
+    "description": "Канализационные линии, гофры, трапы, манжеты",
+    "typical_unit": "шт/м.п./точка",
+    "pricing_strategy": "per_unit/per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_DRAWER_SLIDES",
+    "name": "Установка направляющих/выкатных систем",
+    "description": "Направляющие ящиков, корзины, бутылочницы",
+    "typical_unit": "компл./шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_FILTER",
+    "name": "Установка фильтра",
+    "description": "Фильтры воды разного класса",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_HANDLE",
+    "name": "Установка ручек",
+    "description": "Мебельные ручки, накладки",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_HEATING_FIXTURE",
+    "name": "Монтаж отопительного прибора",
+    "description": "Полотенцесушители и похожие узлы",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_JBOX",
+    "name": "?????? ?????????? ???????",
+    "description": "????????? ? ?????????? ?????????? ???????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_LIGHT_FIXTURE",
+    "name": "Монтаж светильника",
+    "description": "Споты, плафоны, бра, светильники",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_LOWCURRENT_POINT",
+    "name": "?????? ??????????? ?????",
+    "description": "????????? ????????????, ??, ?????????? ? ???? ??????????? ???????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_METER",
+    "name": "Установка электросчетчика",
+    "description": "Монтаж и подключение счетчика без опломбировки и работ сетевой компании.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_MIXER",
+    "name": "Установка смесителя",
+    "description": "Смесители для ванной, раковины, биде, гигиенический душ",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_POINT",
+    "name": "Монтаж точки",
+    "description": "Розетка/слаботочка/подрозетник/коробка",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_POWER_SOCKET",
+    "name": "?????? ??????? ???????",
+    "description": "????????? ??????? ??????? ? ????????? ??????????? ??? ?????? ????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_PROTECTION_DEVICE",
+    "name": "Монтаж защитного аппарата",
+    "description": "Установка автоматов, УЗО, дифавтоматов, реле и аналогичных модульных устройств.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_PUMP",
+    "name": "Монтаж насоса",
+    "description": "Повысительные/циркуляционные насосы",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_RADIATOR",
+    "name": "Монтаж радиатора",
+    "description": "Радиаторы отопления и узлы подключения",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_RAIL",
+    "name": "Монтаж рейлинга",
+    "description": "Кухонные/настенные рейлинги и штанги",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_SHOWER_CABIN",
+    "name": "Установка душевой кабины/уголка",
+    "description": "Кабины, уголки, душевые ограждения",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_SINK",
+    "name": "Установка раковины/мойки",
+    "description": "Раковины, мойки, мойдодыры",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_SIPHON",
+    "name": "Установка сифона/слива",
+    "description": "Сифоны и слив-переливы",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_SWITCH",
+    "name": "Монтаж выключателя/диммера",
+    "description": "Выключатели и блоки выключателей",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_SWITCH_BLOCK",
+    "name": "?????? ????? ????????????",
+    "description": "????????? ? ?????? ??????? ???????????? ? ??????????????? ?????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_TOILET",
+    "name": "Установка унитаза/инсталляции",
+    "description": "Унитазы, бачки, подвесные решения",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_VALVE",
+    "name": "Установка арматуры",
+    "description": "Краны, вентили, клапаны, байпасы, маевский",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_WATER_HEATER",
+    "name": "Монтаж водонагревателя",
+    "description": "Бойлеры и проточные водонагреватели",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#INSTALL_WATER_LINE",
+    "name": "Монтаж водопровода",
+    "description": "Разводка воды, точки, трубы, коллекторы, стояки",
+    "typical_unit": "точка/м.п./шт",
+    "pricing_strategy": "per_unit/per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#LOW_CURRENT_CABLE",
+    "name": "Прокладка слаботочного кабеля",
+    "description": "Открытая/скрытая прокладка UTP, FTP, КВК и смежных слаботочных линий.",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#MIN_ORDER",
+    "name": "Минимальный заказ",
+    "description": "Минимальная сумма заказа или старт работ",
+    "typical_unit": "заказ",
+    "pricing_strategy": "min_order",
+    "is_active": true
+  },
+  {
+    "code": "#MOUNT_ACCESSORY",
+    "name": "Монтаж аксессуара",
+    "description": "Установка крышек, держателей, декоративных и вспомогательных аксессуаров.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#MOUNT_DEVICE",
+    "name": "?????? ?????????????????",
+    "description": "??????? ? ????????? ???????, ??????????? ??? ??????????? ????????????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#MOUNT_FURNITURE",
+    "name": "Монтаж/навеска",
+    "description": "Крепление мебели, модулей, зеркал, полок к стене/основанию",
+    "typical_unit": "шт/точка",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#MOUNT_FURNITURE_FRONT",
+    "name": "Навеска фасада/двери",
+    "description": "Фасад, дверь-купе, фасад ПММ и аналогичные операции",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#PASS_HOLE_FURNITURE",
+    "name": "Отверстие в мебели/панели",
+    "description": "Сверление отверстий под кабель, трубу, крепеж",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#PASS_THROUGH_CONTROL",
+    "name": "????????? ??????????",
+    "description": "?????? ? ?????????? ????????? ? ???????????? ????????????.",
+    "typical_unit": "?????",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#PATCH_STROBE",
+    "name": "Заделка штробы",
+    "description": "Черновая заделка после скрытой прокладки",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#REFRIGERANT_SERVICE",
+    "name": "Работы с холодильным контуром",
+    "description": "Заправка, восстановление контура и иные работы с холодильным агентом.",
+    "typical_unit": "усл.",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPAIR_APPLIANCE",
+    "name": "?????? ???????",
+    "description": "?????? ???????? ??? ??????????????? ??????? ??? ????????? ?????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPAIR_DEVICE",
+    "name": "?????? ??????????",
+    "description": "????????? ?????? ????????????????? ??? ?????? ?????? ?????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPAIR_DRAIN",
+    "name": "?????? ???????? ????",
+    "description": "????????? ?????? ??????, ?????, ???????? ? ??????????? ?????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPAIR_FIXTURE",
+    "name": "?????? ?????????????",
+    "description": "????????? ?????? ?????, ???????, ???????? ? ?????? ?????????????? ????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPAIR_MIXER",
+    "name": "Ремонт смесителя",
+    "description": "Картриджи, кран-буксы, диверторы, прокладки",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPLACE_DEVICE",
+    "name": "?????? ??????????",
+    "description": "?????? ???????? ?????????? ?? ????? ??? ???????????? ????????? ?????????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#REPLACE_PROTECTION_DEVICE",
+    "name": "?????? ????????? ????????",
+    "description": "?????? ????????, ???, ??????????? ??? ???????????? ?????? ? ????.",
+    "typical_unit": "??",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#RJ45_TERMINATION",
+    "name": "Оконцевание слаботочной линии",
+    "description": "Обжим RJ-45/BNC, установка модулей, проверка тестером.",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#SEALING",
+    "name": "Герметизация",
+    "description": "Силикон, бордюр, уголок",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#SECURITY_CONFIG",
+    "name": "Пусконаладка систем безопасности",
+    "description": "Базовая настройка, проверка тревог, удаленный доступ, тест уведомлений.",
+    "typical_unit": "усл.",
+    "pricing_strategy": "service",
+    "is_active": true
+  },
+  {
+    "code": "#SERVICE_FILTER",
+    "name": "Сервис фильтра",
+    "description": "Обслуживание/замена картриджей",
+    "typical_unit": "компл.",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#SMART_HOME_PAIRING",
+    "name": "Привязка и интеграция умных устройств",
+    "description": "Включение устройств в контур умного дома, проверка связи и базовая логика.",
+    "typical_unit": "устройство",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  },
+  {
+    "code": "#SMART_HOME_SCENE",
+    "name": "Настройка сценариев умного дома",
+    "description": "Автоматизации, расписания, условия, уведомления, геозоны и голосовые команды.",
+    "typical_unit": "сценарий/пакет",
+    "pricing_strategy": "package",
+    "is_active": true
+  },
+  {
+    "code": "#STROBE_BRICK",
+    "name": "Штроба в кирпиче",
+    "description": "Под скрытую трассу/кабель",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#STROBE_CONCRETE",
+    "name": "Штроба в бетоне",
+    "description": "Под скрытую трассу/кабель",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#STROBE_GYPSUM",
+    "name": "Штроба в гипсе",
+    "description": "Под скрытую трассу/кабель",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#STROBE_WALL",
+    "name": "Штробление стены",
+    "description": "Универсальная операция под трубы/кабель с зависимостью от материала стены",
+    "typical_unit": "м.п.",
+    "pricing_strategy": "per_meter",
+    "is_active": true
+  },
+  {
+    "code": "#UNCLOG_SEWER",
+    "name": "Устранение засора",
+    "description": "Локальная прочистка и разборка сифона",
+    "typical_unit": "шт",
+    "pricing_strategy": "per_unit",
+    "is_active": true
+  }
+]

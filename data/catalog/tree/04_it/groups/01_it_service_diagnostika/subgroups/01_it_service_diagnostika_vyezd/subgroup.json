@@ -1,0 +1,7 @@
+{
+  "code": "it_service_diagnostika_vyezd",
+  "group_code": "it_service_diagnostika",
+  "name": "Выезд и диагностика",
+  "sort_priority": 1,
+  "is_active": true
+}

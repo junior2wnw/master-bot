@@ -9,6 +9,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from scripts.catalog_tree import (
+    TREE_ROOT,
+    build_bundle_from_tree,
+    export_bundle_to_tree,
+    tree_exists,
+)
+
 from app.models.catalog import (
     Profession,
     ServiceGroup,
@@ -24,6 +31,9 @@ BUNDLE_PATH = CATALOG_DIR / "catalog_bundle.json"
 
 
 def load_catalog_bundle(path: Path | None = None) -> dict[str, Any]:
+    if path is None and tree_exists(TREE_ROOT):
+        return build_bundle_from_tree(TREE_ROOT)
+
     bundle_path = path or BUNDLE_PATH
     with bundle_path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
@@ -35,6 +45,8 @@ def save_catalog_bundle(bundle: dict[str, Any], path: Path | None = None) -> Pat
     with bundle_path.open("w", encoding="utf-8") as fh:
         json.dump(bundle, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
+    if path is None and tree_exists(TREE_ROOT):
+        export_bundle_to_tree(bundle, root=TREE_ROOT, clear_root=True)
     return bundle_path
 
 

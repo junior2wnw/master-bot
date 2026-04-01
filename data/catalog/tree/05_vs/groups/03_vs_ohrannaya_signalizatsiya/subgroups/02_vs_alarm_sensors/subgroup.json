@@ -1,0 +1,7 @@
+{
+  "code": "vs_alarm_sensors",
+  "group_code": "vs_ohrannaya_signalizatsiya",
+  "name": "Датчики, сирены и уведомления",
+  "sort_priority": 2,
+  "is_active": true
+}

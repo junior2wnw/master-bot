@@ -2,23 +2,47 @@
 
 from __future__ import annotations
 
-from scripts.catalog_bundle import load_catalog_bundle
+from scripts.catalog_bundle import BUNDLE_PATH, load_catalog_bundle
+from scripts.catalog_tree import build_bundle_from_tree
 
 
 def test_catalog_bundle_contains_full_multidomain_catalog():
     bundle = load_catalog_bundle()
     stats = bundle["metadata"]["stats"]
 
-    assert stats["professions"] >= 4
-    assert stats["items_total"] >= 600
-    assert stats["items_base"] >= 300
+    assert stats["professions"] >= 7
+    assert stats["items_total"] >= 750
+    assert stats["items_base"] >= 400
     assert stats["items_it"] >= 300
+    assert stats["items_bt"] >= 40
+
+
+def test_catalog_tree_and_built_bundle_stay_in_sync():
+    tree_bundle = load_catalog_bundle()
+    json_bundle = load_catalog_bundle(BUNDLE_PATH)
+    rebuilt_bundle = build_bundle_from_tree()
+
+    assert tree_bundle["metadata"]["version"] == json_bundle["metadata"]["version"]
+    assert tree_bundle["metadata"]["version"] == rebuilt_bundle["metadata"]["version"]
+    assert {item["code"] for item in tree_bundle["items"]} == {
+        item["code"] for item in json_bundle["items"]
+    }
+    assert {item["code"] for item in tree_bundle["items"]} == {
+        item["code"] for item in rebuilt_bundle["items"]
+    }
 
 
 def test_catalog_bundle_has_unique_item_codes():
     bundle = load_catalog_bundle()
     item_codes = [item["code"] for item in bundle["items"]]
     assert len(item_codes) == len(set(item_codes))
+
+
+def test_all_catalog_prices_are_ordered():
+    bundle = load_catalog_bundle()
+
+    for item in bundle["items"]:
+        assert item["price_min"] <= item["price_recommended"] <= item["price_max"], item["code"]
 
 
 def test_selection_rules_are_merged_into_catalog_items():
@@ -35,6 +59,55 @@ def test_it_catalog_is_present_and_search_ready():
     assert item["hashtags"]
     assert item["search_text"]
     assert item["estimator_fields"]
+
+
+def test_it_catalog_contains_wide_range_device_assembly_service():
+    bundle = load_catalog_bundle()
+    item = next(item for item in bundle["items"] if item["code"] == "IT-014A")
+
+    assert item["profession_code"] == "IT"
+    assert item["price_min"] < item["price_recommended"] < item["price_max"]
+    assert item["price_max"] - item["price_min"] >= 10000
+    assert "сборка устройства" in (item["aliases"] or "").lower()
+    assert item["estimator_fields"]
+
+
+def test_bt_catalog_is_present_and_has_defined_refs():
+    bundle = load_catalog_bundle()
+    profession_codes = {entry["code"] for entry in bundle["professions"]}
+    assert "BT" in profession_codes
+
+    shared_ops = {entry["code"] for entry in bundle["shared_operations"]}
+    estimator_fields = {entry["field_key"] for entry in bundle["estimator_fields"]}
+    bt_items = [item for item in bundle["items"] if item["code"].startswith("BT-")]
+
+    assert len(bt_items) >= 40
+
+    for item in bt_items:
+        for op in [part.strip() for part in (item.get("shared_ops") or "").split(";") if part.strip()]:
+            assert op in shared_ops, (item["code"], op)
+        for field in [part.strip() for part in (item.get("estimator_fields") or "").split(",") if part.strip()]:
+            assert field in estimator_fields, (item["code"], field)
+
+    washer_diag = next(item for item in bt_items if item["code"] == "BT-WM-DIAG")
+    assert washer_diag["profession_code"] == "BT"
+    assert washer_diag["price_updated_at"] == "2026-04-02"
+    assert washer_diag["source_1"].startswith("market:")
+
+
+def test_market_refresh_added_key_high_value_positions():
+    bundle = load_catalog_bundle()
+    index = {item["code"]: item for item in bundle["items"]}
+
+    assert "PL-CLOG-CHEMICAL" in index
+    assert "PL-WH-INSTALL-LARGE" in index
+    assert "EL-APP-HOB-CONN" in index
+    assert "EL-PNL-SHIELD-36M" in index
+
+    assert index["PL-CLOG-REMOVE"]["price_recommended"] >= 4000
+    assert index["EL-PNL-MCB-2P"]["price_min"] < index["EL-PNL-MCB-2P"]["price_recommended"]
+    assert index["EL-PNL-SHIELD-36M"]["price_recommended"] >= 11990
+    assert index["PL-WH-INSTALL-LARGE"]["price_recommended"] >= 6500
 
 
 def test_manual_security_and_smart_home_extensions_are_present():

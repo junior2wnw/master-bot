@@ -1,0 +1,8 @@
+{
+  "code": "PL",
+  "name": "Сантехника",
+  "description": "Сантехнические монтажные и сервисные работы.",
+  "icon": "🔧",
+  "sort_priority": 2,
+  "is_active": true
+}

@@ -1,0 +1,7 @@
+{
+  "code": "it_hdd_ssd_bios",
+  "group_code": "it_hdd_ssd",
+  "name": "BIOS и прошивки",
+  "sort_priority": 12,
+  "is_active": true
+}

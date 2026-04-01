@@ -1,0 +1,7 @@
+{
+  "code": "it_hdd_ssd_rabota_hdd",
+  "group_code": "it_hdd_ssd",
+  "name": "Работа с HDD/SSD",
+  "sort_priority": 10,
+  "is_active": true
+}

@@ -1,0 +1,7 @@
+{
+  "code": "it_bezopasnost_antivirus",
+  "group_code": "it_bezopasnost",
+  "name": "Антивирусное ПО",
+  "sort_priority": 14,
+  "is_active": true
+}

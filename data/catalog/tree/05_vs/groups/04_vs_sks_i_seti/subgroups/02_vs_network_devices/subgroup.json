@@ -1,0 +1,7 @@
+{
+  "code": "vs_network_devices",
+  "group_code": "vs_sks_i_seti",
+  "name": "Розетки, точки доступа и PoE",
+  "sort_priority": 2,
+  "is_active": true
+}

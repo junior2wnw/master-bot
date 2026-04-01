@@ -1,0 +1,7 @@
+{
+  "code": "sh_sockets_and_power",
+  "group_code": "sh_osveschenie_i_rozetki",
+  "name": "Розетки и контроль нагрузки",
+  "sort_priority": 2,
+  "is_active": true
+}

@@ -1,0 +1,8 @@
+{
+  "code": "FM",
+  "name": "Сборка мебели",
+  "description": "Сборка, монтаж и навеска мебели.",
+  "icon": "🪑",
+  "sort_priority": 3,
+  "is_active": true
+}

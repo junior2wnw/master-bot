@@ -1,0 +1,7 @@
+{
+  "code": "it_remont_pk",
+  "profession_code": "IT",
+  "name": "Ремонт ПК и ноутбуков",
+  "sort_priority": 2,
+  "is_active": true
+}

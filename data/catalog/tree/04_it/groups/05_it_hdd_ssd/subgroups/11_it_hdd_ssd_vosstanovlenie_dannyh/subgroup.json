@@ -1,0 +1,7 @@
+{
+  "code": "it_hdd_ssd_vosstanovlenie_dannyh",
+  "group_code": "it_hdd_ssd",
+  "name": "Восстановление данных",
+  "sort_priority": 11,
+  "is_active": true
+}

@@ -1,0 +1,875 @@
+[
+  {
+    "field_key": "access_level",
+    "label_ru": "Сложность доступа",
+    "input_type": "enum",
+    "example_options": "свободный; тесно; демонтаж панели",
+    "applies_to": "all",
+    "why_needed": "Повышающий коэффициент",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "address_zone",
+    "label_ru": "Зона выезда",
+    "input_type": "text",
+    "example_options": "Стерлитамак центр; пригород",
+    "applies_to": "all",
+    "why_needed": "Логистика выезда.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "alarm_type",
+    "label_ru": "Тип сигнализации",
+    "input_type": "enum",
+    "example_options": "GSM; проводная; беспроводная; гибридная; охранная; пожарная",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Нужно для правильного набора датчиков и ПНР.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "antivirus_installed",
+    "label_ru": "Есть антивирус",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Для кейсов с вирусами и безопасностью.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "apple_id_access",
+    "label_ru": "Есть доступ к Apple ID / iCloud",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Ключевой блокер для Apple-сценариев.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "appliance_type",
+    "label_ru": "Тип техники",
+    "input_type": "enum",
+    "example_options": "стиральная машина; посудомоечная машина; холодильник; варочная панель; духовой шкаф; микроволновка; кофемашина; водонагреватель; пылесос",
+    "applies_to": "электрика; ремонт техники",
+    "why_needed": "Помогает быстро вывести релевантные услуги и поправить цену.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "assistant_platform",
+    "label_ru": "Голосовой ассистент",
+    "input_type": "enum",
+    "example_options": "Алиса; Siri; Google Assistant; Салют; не требуется",
+    "applies_to": "умный дом",
+    "why_needed": "Помогает правильно оценить голосовую интеграцию.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "automation_scope",
+    "label_ru": "Объем сценариев",
+    "input_type": "enum",
+    "example_options": "стартовый пакет; до 5 устройств; 6-20 устройств; 21-50 устройств",
+    "applies_to": "умный дом",
+    "why_needed": "Сценарии оцениваются по количеству устройств и логических связей.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "bath_size",
+    "label_ru": "Размер ванны",
+    "input_type": "enum",
+    "example_options": "150;160;170;180;нестандарт",
+    "applies_to": "сантехника",
+    "why_needed": "Уточнение веса и сложности",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "bath_type",
+    "label_ru": "Тип ванны",
+    "input_type": "enum",
+    "example_options": "акрил; сталь; чугун; угловая; гидромассаж",
+    "applies_to": "сантехника",
+    "why_needed": "Классификация ванн",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "bed_size",
+    "label_ru": "Размер кровати",
+    "input_type": "enum",
+    "example_options": "детская; 90x200; 140x200; 160x200; 180x200",
+    "applies_to": "мебель",
+    "why_needed": "Влияет на трудоемкость",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "block_type",
+    "label_ru": "??? ?????",
+    "input_type": "enum",
+    "example_options": "???????????; ???????; ??????????????? ????",
+    "applies_to": "?????????",
+    "why_needed": "????? ??? ?????????? ?????? ??????? ?????????.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "branch_count",
+    "label_ru": "Количество отводов/веток",
+    "input_type": "int",
+    "example_options": "2..12",
+    "applies_to": "сантехника",
+    "why_needed": "Для коллекторов",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "brand_model",
+    "label_ru": "Марка и модель",
+    "input_type": "text",
+    "example_options": "Lenovo IdeaPad 3; MacBook Pro A1708",
+    "applies_to": "компьютерный мастер; ремонт техники",
+    "why_needed": "Точная оценка и запчасти.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "built_in",
+    "label_ru": "Встраиваемая техника/мебель",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "сантехника; мебель; ремонт техники",
+    "why_needed": "Встроенные сценарии сложнее",
+    "normalization_notes": "посудомойка, холодильник, шкаф"
+  },
+  {
+    "field_key": "cabin_size",
+    "label_ru": "Размер душевой",
+    "input_type": "enum",
+    "example_options": "80x80; 90x90; 120x80; нестандарт",
+    "applies_to": "сантехника",
+    "why_needed": "Сильное влияние на трудоемкость",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "cabin_type",
+    "label_ru": "Тип душевой",
+    "input_type": "enum",
+    "example_options": "кабина; уголок; панель",
+    "applies_to": "сантехника",
+    "why_needed": "Классификация сложных сантехработ",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "cable_count",
+    "label_ru": "?????????? ???????",
+    "input_type": "int",
+    "example_options": "2; 3; 4; 5",
+    "applies_to": "?????????",
+    "why_needed": "??? ??????? ? ?????????? ????? ???????? ???????????? ????????.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "cable_length_m",
+    "label_ru": "Длина кабеля, м",
+    "input_type": "float",
+    "example_options": "5; 12; 35",
+    "applies_to": "видеонаблюдение и слаботочка; умный дом",
+    "why_needed": "Без длины трассы нельзя корректно считать слаботочку.",
+    "normalization_notes": "meters"
+  },
+  {
+    "field_key": "cable_route_type",
+    "label_ru": "Тип трассы",
+    "input_type": "enum",
+    "example_options": "открыто; кабель-канал; гофра; за потолком; штроба; улица",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Маршрут укладки меняет цену за метр.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "camera_count",
+    "label_ru": "Количество камер",
+    "input_type": "int",
+    "example_options": "1; 2; 4; 8; 16",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Нужно для подбора регистратора и объема пусконаладки.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "camera_type",
+    "label_ru": "Тип камеры",
+    "input_type": "enum",
+    "example_options": "аналоговая; IP; поворотная PTZ; купольная; цилиндрическая; уличная",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Влияет на трудоемкость монтажа и пусконаладки.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "circuit_points",
+    "label_ru": "?????????? ????? ??????????",
+    "input_type": "int",
+    "example_options": "2; 3; 4",
+    "applies_to": "?????????",
+    "why_needed": "??? ????????? ? ???????????? ???????????? ???????????? ??????? ?? ????? ?????.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "clog_location",
+    "label_ru": "Место засора",
+    "input_type": "enum",
+    "example_options": "раковина; мойка; ванна; унитаз",
+    "applies_to": "сантехника",
+    "why_needed": "Для выбора прочистки",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "communications_ready",
+    "label_ru": "Коммуникации готовы",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "электрика; сантехника",
+    "why_needed": "Если нет — нужны допработы по подводке",
+    "normalization_notes": "влияет на bundled сценарии"
+  },
+  {
+    "field_key": "countertop_material",
+    "label_ru": "Материал столешницы",
+    "input_type": "enum",
+    "example_options": "ЛДСП; HPL; массив; искусственный камень",
+    "applies_to": "сантехника; мебель",
+    "why_needed": "Влияет на рез и монтаж",
+    "normalization_notes": "важно для вырезов"
+  },
+  {
+    "field_key": "curtain_count",
+    "label_ru": "Количество приводов штор",
+    "input_type": "int",
+    "example_options": "1; 2; 4",
+    "applies_to": "умный дом",
+    "why_needed": "Нужно для расчета электрокарнизов и настроек.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "data_backup_needed",
+    "label_ru": "Нужно сохранить данные",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Критично для Windows и накопителей.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "device_count",
+    "label_ru": "Количество устройств",
+    "input_type": "int",
+    "example_options": "1; 5; 20; 50",
+    "applies_to": "умный дом; видеонаблюдение и слаботочка",
+    "why_needed": "Позволяет рассчитать масштаб интеграции и сценариев.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "device_type",
+    "label_ru": "Тип устройства",
+    "input_type": "enum",
+    "example_options": "ПК; ноутбук; MacBook; роутер",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Быстрый подбор релевантных услуг.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "diagnostic_depth",
+    "label_ru": "Глубина диагностики",
+    "input_type": "enum",
+    "example_options": "без разборки; с частичной разборкой; с глубокой разборкой",
+    "applies_to": "ремонт техники",
+    "why_needed": "Разбор сильно влияет на цену первичной диагностики.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "door_count",
+    "label_ru": "Количество дверей",
+    "input_type": "int",
+    "example_options": "1;2;3;4",
+    "applies_to": "мебель",
+    "why_needed": "Классифицирует шкафы и купе",
+    "normalization_notes": "использовать для auto-suggest"
+  },
+  {
+    "field_key": "door_material",
+    "label_ru": "Материал двери",
+    "input_type": "enum",
+    "example_options": "металл; дерево; ПВХ; стекло; алюминий",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Материал влияет на сверление и посадочные места.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "drawer_count",
+    "label_ru": "Количество ящиков",
+    "input_type": "int",
+    "example_options": "2;3;4;5;6",
+    "applies_to": "мебель",
+    "why_needed": "Классифицирует комоды/столы/тумбы",
+    "normalization_notes": "можно маппить на SKU"
+  },
+  {
+    "field_key": "drive_type",
+    "label_ru": "Тип накопителя",
+    "input_type": "enum",
+    "example_options": "HDD; SSD SATA; SSD NVMe",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Для работ с дисками и переносом данных.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "elevator",
+    "label_ru": "Лифт",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "сантехника; мебель",
+    "why_needed": "Учитывает тяжелый подъем",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "fan_type",
+    "label_ru": "Тип вентилятора",
+    "input_type": "enum",
+    "example_options": "осевой; канальный; вытяжной; настенный; потолочный",
+    "applies_to": "электрика",
+    "why_needed": "Тип прибора влияет на трудоемкость монтажа и подключения.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "fixture_state",
+    "label_ru": "Состояние демонтируемого узла",
+    "input_type": "enum",
+    "example_options": "исправен; прикипел; закис; нужен аккуратный демонтаж",
+    "applies_to": "сантехника",
+    "why_needed": "Позволяет точнее оценить демонтаж и риск разрушения крепежа.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "fixture_type",
+    "label_ru": "Тип прибора",
+    "input_type": "enum",
+    "example_options": "раковина; мойка; унитаз; ванна; стиралка",
+    "applies_to": "сантехника",
+    "why_needed": "Для выбора точки воды/канализации",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "floor_number",
+    "label_ru": "Этаж",
+    "input_type": "int",
+    "example_options": "1..25",
+    "applies_to": "сантехника",
+    "why_needed": "Важно для тяжелых ванн/подъема",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "frame_ready",
+    "label_ru": "Инсталляция уже смонтирована",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "сантехника",
+    "why_needed": "Подвесные приборы сильно отличаются по цене при готовой и неготовой раме.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "front_material",
+    "label_ru": "???????? ??????",
+    "input_type": "enum",
+    "example_options": "???; ????; ??????; ??????",
+    "applies_to": "??????????; ??????",
+    "why_needed": "?????? ??? ? ??????????? ?????? ?????????? ?? ????????? ???????.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "groove_length_m",
+    "label_ru": "Длина штробы, м",
+    "input_type": "float",
+    "example_options": "0.5..50",
+    "applies_to": "электрика; сантехника",
+    "why_needed": "Для скрытых трасс",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "heater_type",
+    "label_ru": "Тип водонагревателя",
+    "input_type": "enum",
+    "example_options": "накопительный; проточный; электрический; комбинированный",
+    "applies_to": "сантехника; ремонт техники",
+    "why_needed": "Нужно для выбора правильной категории работ и трудоемкости.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "heater_volume_l",
+    "label_ru": "Объем водонагревателя, л",
+    "input_type": "int",
+    "example_options": "10;30;50;80;100",
+    "applies_to": "сантехника; ремонт техники",
+    "why_needed": "Влияет на вес, крепеж и время",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "heating_zone_count",
+    "label_ru": "Количество зон климата",
+    "input_type": "int",
+    "example_options": "1; 2; 4; 8",
+    "applies_to": "умный дом",
+    "why_needed": "Термостаты и климат всегда считаются по зонам.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "hole_diameter",
+    "label_ru": "Диаметр отверстия",
+    "input_type": "int",
+    "example_options": "10;20;35;60",
+    "applies_to": "мебель; сантехника",
+    "why_needed": "Уточнение сверления",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "hose_type",
+    "label_ru": "??? ??????",
+    "input_type": "enum",
+    "example_options": "????????; ???????; ????????",
+    "applies_to": "??????????",
+    "why_needed": "?????? ??? ?????? ???????? ?????? ????? ??????????? ? ???????.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "intercom_type",
+    "label_ru": "Тип домофона",
+    "input_type": "enum",
+    "example_options": "видеодомофон; IP-домофон; подъездный; частный дом",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Влияет на состав оборудования и схему коммутации.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "internet_issue",
+    "label_ru": "Проблема с интернетом",
+    "input_type": "text",
+    "example_options": "нет интернета; слабый Wi-Fi",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Уточнение сетевого сценария.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "issue_symptom",
+    "label_ru": "Симптом проблемы",
+    "input_type": "text",
+    "example_options": "не включается; шумит; нет Wi-Fi",
+    "applies_to": "компьютерный мастер; ремонт техники",
+    "why_needed": "Ускоряет intake и подбор работ.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "joint_length_m",
+    "label_ru": "Длина шва, м",
+    "input_type": "float",
+    "example_options": "1..10",
+    "applies_to": "сантехника",
+    "why_needed": "Для герметизации",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "leak_points_count",
+    "label_ru": "Точки защиты от протечки",
+    "input_type": "int",
+    "example_options": "1; 2; 3; 5",
+    "applies_to": "умный дом",
+    "why_needed": "Влияет на число датчиков и приводов.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "lighting_present",
+    "label_ru": "Есть подсветка",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "мебель",
+    "why_needed": "Нужно для торговых витрин",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "load_power_kw",
+    "label_ru": "Мощность нагрузки, кВт",
+    "input_type": "float",
+    "example_options": "2.2; 3.5; 7.0",
+    "applies_to": "электрика",
+    "why_needed": "Определяет требования к линии, розетке и аппарату защиты.",
+    "normalization_notes": "kW"
+  },
+  {
+    "field_key": "lock_type",
+    "label_ru": "Тип замка",
+    "input_type": "enum",
+    "example_options": "электромагнитный; электромеханический; защелка",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Разные замки требуют разный крепеж и питание.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "mac_model",
+    "label_ru": "Модель MacBook / iMac",
+    "input_type": "text",
+    "example_options": "A1278; A1708",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Привязка к точной модели.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "mechanism_type",
+    "label_ru": "Тип механизма",
+    "input_type": "enum",
+    "example_options": "газлифт; книжка; трансформер; маятник",
+    "applies_to": "мебель",
+    "why_needed": "Усложняет сборку",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "meter_type",
+    "label_ru": "Тип счетчика",
+    "input_type": "enum",
+    "example_options": "однофазный; трехфазный; однотарифный; многотарифный",
+    "applies_to": "электрика",
+    "why_needed": "Тип счетчика влияет на цену работ и подключение.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "mixer_brand",
+    "label_ru": "Марка смесителя",
+    "input_type": "text",
+    "example_options": "Grohe; Damixa; Lemark",
+    "applies_to": "сантехника",
+    "why_needed": "Часть брендов требует специфичных картриджей и расходников.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "mixer_type",
+    "label_ru": "Тип смесителя",
+    "input_type": "enum",
+    "example_options": "обычный; термостат; сенсорный; гигиенический",
+    "applies_to": "сантехника",
+    "why_needed": "Влияет на цену и cross-domain электрику",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "module_count",
+    "label_ru": "Количество модулей",
+    "input_type": "int",
+    "example_options": "1..20",
+    "applies_to": "мебель",
+    "why_needed": "Для кухонь, стенок, гардеробных, торговой мебели",
+    "normalization_notes": "quantity dimension"
+  },
+  {
+    "field_key": "module_weight",
+    "label_ru": "Вес модуля",
+    "input_type": "enum",
+    "example_options": "легкий; средний; тяжелый",
+    "applies_to": "мебель",
+    "why_needed": "Для навесных шкафов и зеркал",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "mount_height_m",
+    "label_ru": "Высота монтажа, м",
+    "input_type": "float",
+    "example_options": "2.5; 3; 4.5",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Высота напрямую влияет на цену и коэффициенты.",
+    "normalization_notes": "meters"
+  },
+  {
+    "field_key": "mounting_type",
+    "label_ru": "??? ???????",
+    "input_type": "enum",
+    "example_options": "??????????; ????????",
+    "applies_to": "?????????",
+    "why_needed": "???????? ? ?????????? ?????? ????????? ??-???????.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "need_anchor_to_wall",
+    "label_ru": "Нужна анкеровка к стене",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "мебель",
+    "why_needed": "Безопасность для высоких/детских изделий",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "network_device_type",
+    "label_ru": "Сетевое устройство",
+    "input_type": "enum",
+    "example_options": "роутер; PoE-коммутатор; точка доступа; NVR; DVR; блок питания",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Уточняет тип активного оборудования для пусконаладки.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "niche_ready",
+    "label_ru": "Ниша и мебель готовы",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "электрика; ремонт техники",
+    "why_needed": "Для встроенной техники цена зависит от готовности ниши и фасадов.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "object_type",
+    "label_ru": "Тип объекта",
+    "input_type": "enum",
+    "example_options": "квартира; дом; офис; магазин",
+    "applies_to": "all",
+    "why_needed": "Фильтр по контексту и коэффициентам",
+    "normalization_notes": "нормализовать в short enum"
+  },
+  {
+    "field_key": "os_version",
+    "label_ru": "Версия ОС",
+    "input_type": "text",
+    "example_options": "Windows 10; macOS Sonoma",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Совместимость и сценарии работ.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "panel_access",
+    "label_ru": "Доступ к узлу",
+    "input_type": "enum",
+    "example_options": "свободный; ограниченный",
+    "applies_to": "сантехника",
+    "why_needed": "Влияет на душевые кабины/скрытые узлы",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "pipe_diameter",
+    "label_ru": "Диаметр трубы",
+    "input_type": "enum",
+    "example_options": "16;20;25;32;40;50;110",
+    "applies_to": "сантехника",
+    "why_needed": "Для резьбы, фитингов, канализации",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "pipe_length_m",
+    "label_ru": "Длина трассы, м",
+    "input_type": "float",
+    "example_options": "0.5..50",
+    "applies_to": "сантехника",
+    "why_needed": "Нужна для водоснабжения/отопления",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "pipe_material",
+    "label_ru": "Материал трубы",
+    "input_type": "enum",
+    "example_options": "ППР; металлопластик; сталь; ПВХ; чугун",
+    "applies_to": "сантехника",
+    "why_needed": "Ключевой фактор цены",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "poles",
+    "label_ru": "?????????? ???????",
+    "input_type": "enum",
+    "example_options": "1P; 2P; 3P; 4P",
+    "applies_to": "?????????",
+    "why_needed": "?????? ?? ?????? ???????? ? ????????? ???????.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "power_ready",
+    "label_ru": "Подведено питание",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "электрика; сантехника",
+    "why_needed": "Нужно для бойлеров, сенсорных смесителей, диспоузеров",
+    "normalization_notes": "cross-domain"
+  },
+  {
+    "field_key": "problem_type",
+    "label_ru": "Тип неисправности",
+    "input_type": "enum",
+    "example_options": "не греет; течет; коротит; засор; люфт",
+    "applies_to": "электрика; сантехника",
+    "why_needed": "Для диагностики и ремонта",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "provider_name",
+    "label_ru": "Интернет-провайдер",
+    "input_type": "text",
+    "example_options": "Ростелеком; Уфанет",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Диагностика сети и IPTV.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "recorder_channels",
+    "label_ru": "Каналы регистратора",
+    "input_type": "enum",
+    "example_options": "4; 8; 16; 32",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Нужно для подбора DVR/NVR и оценки пусконаладки.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "requires_hole",
+    "label_ru": "????? ?? ???????????? ?????????",
+    "input_type": "bool",
+    "example_options": "??; ???",
+    "applies_to": "?????????",
+    "why_needed": "?????????????? ????????? ?????? ???? ??????? ? ?????.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "router_model",
+    "label_ru": "Модель роутера",
+    "input_type": "text",
+    "example_options": "Keenetic Viva; TP-Link Archer C6",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Для сетевых кейсов.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "sections_count",
+    "label_ru": "Количество секций",
+    "input_type": "int",
+    "example_options": "4..14",
+    "applies_to": "сантехника",
+    "why_needed": "Для радиаторов",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "sensor_count",
+    "label_ru": "Количество датчиков",
+    "input_type": "int",
+    "example_options": "1; 2; 4; 8",
+    "applies_to": "видеонаблюдение и слаботочка",
+    "why_needed": "Определяет объем монтажа и настройки.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "shelf_count",
+    "label_ru": "Количество полок",
+    "input_type": "int",
+    "example_options": "1..10",
+    "applies_to": "мебель",
+    "why_needed": "Для стеллажей и гардеробных",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "sink_type",
+    "label_ru": "Тип мойки/раковины",
+    "input_type": "enum",
+    "example_options": "накладная; врезная; на тумбу; над стиралкой",
+    "applies_to": "сантехника",
+    "why_needed": "Для точного выбора монтажа",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "smart_platform",
+    "label_ru": "Платформа умного дома",
+    "input_type": "enum",
+    "example_options": "Home Assistant; Яндекс Алиса; Tuya Smart Life; Aqara Home; Apple Home; Google Home; Sber",
+    "applies_to": "умный дом",
+    "why_needed": "От платформы зависит интеграция устройств и сценариев.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "smart_protocol",
+    "label_ru": "Протокол",
+    "input_type": "enum",
+    "example_options": "Wi-Fi; Zigbee; Z-Wave; Thread/Matter; Bluetooth; IR",
+    "applies_to": "умный дом",
+    "why_needed": "Совместимость и способ подключения влияют на объем работ.",
+    "normalization_notes": "short enum"
+  },
+  {
+    "field_key": "socket_ready",
+    "label_ru": "Точка питания готова",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "электрика",
+    "why_needed": "Если розетка или клеммник не готовы, требуется дополнительная работа.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "software_name",
+    "label_ru": "Название программы",
+    "input_type": "text",
+    "example_options": "1С; Office; Photoshop",
+    "applies_to": "компьютерный мастер",
+    "why_needed": "Для установки ПО и драйверов.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "surface_material",
+    "label_ru": "Материал поверхности",
+    "input_type": "enum",
+    "example_options": "нерж.; ЛДСП; МДФ; искусственный камень; керамогранит",
+    "applies_to": "сантехника; мебель",
+    "why_needed": "Влияет на вырезы/сверление",
+    "normalization_notes": "для отверстий и столешниц"
+  },
+  {
+    "field_key": "switch_gangs",
+    "label_ru": "Количество клавиш",
+    "input_type": "int",
+    "example_options": "1; 2; 3",
+    "applies_to": "умный дом",
+    "why_needed": "Нужно для расчета умных выключателей и реле.",
+    "normalization_notes": "positive integer"
+  },
+  {
+    "field_key": "tile_ready",
+    "label_ru": "Плитка и основание готовы",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "сантехника",
+    "why_needed": "Важно для бордюров, герметизации и точной подгонки примыканий.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "toilet_brand",
+    "label_ru": "Марка сантехники",
+    "input_type": "text",
+    "example_options": "Cersanit; AM.PM; Grohe",
+    "applies_to": "сантехника",
+    "why_needed": "Помогает выбрать арматуру, крышки и совместимые запчасти.",
+    "normalization_notes": "free text"
+  },
+  {
+    "field_key": "toilet_type",
+    "label_ru": "Тип унитаза",
+    "input_type": "enum",
+    "example_options": "напольный; подвесной",
+    "applies_to": "сантехника",
+    "why_needed": "Выбор правильной позиции",
+    "normalization_notes": ""
+  },
+  {
+    "field_key": "urgency",
+    "label_ru": "Срочность",
+    "input_type": "enum",
+    "example_options": "обычно; срочно; аварийно",
+    "applies_to": "all",
+    "why_needed": "Нужна для наценки/приоритета",
+    "normalization_notes": "можно хранить как multiplier"
+  },
+  {
+    "field_key": "ventilation_ready",
+    "label_ru": "Вентканал и точка вывода готовы",
+    "input_type": "bool",
+    "example_options": "да; нет",
+    "applies_to": "электрика",
+    "why_needed": "При установке вытяжки сильнее всего влияет готовность канала и вывода.",
+    "normalization_notes": "bool"
+  },
+  {
+    "field_key": "wall_material",
+    "label_ru": "Материал стены",
+    "input_type": "enum",
+    "example_options": "гипс; кирпич; бетон; газоблок; плитка",
+    "applies_to": "электрика; сантехника; мебель",
+    "why_needed": "Критично для штробления, сверления и навески",
+    "normalization_notes": "shared field"
+  }
+]

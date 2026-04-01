@@ -1,0 +1,7 @@
+{
+  "code": "vodosnabzhenie",
+  "group_code": "truby_razvodka_shtroby",
+  "name": "Водоснабжение",
+  "sort_priority": 27,
+  "is_active": true
+}

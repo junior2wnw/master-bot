@@ -1,0 +1,7 @@
+{
+  "code": "vs_cable_routes",
+  "group_code": "vs_sks_i_seti",
+  "name": "Кабельные трассы",
+  "sort_priority": 1,
+  "is_active": true
+}

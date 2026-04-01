@@ -1,0 +1,7 @@
+{
+  "code": "sh_thermostats_and_climate",
+  "group_code": "sh_klimat_i_tehnika",
+  "name": "Термостаты и климат",
+  "sort_priority": 1,
+  "is_active": true
+}

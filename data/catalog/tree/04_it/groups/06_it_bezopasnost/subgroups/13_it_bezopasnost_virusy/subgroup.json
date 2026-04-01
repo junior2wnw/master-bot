@@ -1,0 +1,7 @@
+{
+  "code": "it_bezopasnost_virusy",
+  "group_code": "it_bezopasnost",
+  "name": "Удаление вирусов",
+  "sort_priority": 13,
+  "is_active": true
+}

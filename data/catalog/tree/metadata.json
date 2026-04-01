@@ -1,0 +1,66 @@
+{
+  "version": "2026.04",
+  "editable_source": {
+    "mode": "tree",
+    "root": "data/catalog/tree",
+    "bundle_output": "data/catalog/catalog_bundle.json"
+  },
+  "sources": [
+    {
+      "type": "excel",
+      "path": "sterlitamak_services_catalog_v1 (3).xlsx"
+    },
+    {
+      "type": "docx",
+      "path": "ПРАЙС МНЧ 2024.docx"
+    },
+    {
+      "type": "pdf",
+      "path": "Прайс 2024 БТ-2 (2).pdf"
+    },
+    {
+      "type": "catalog_tree",
+      "path": "data/catalog/tree"
+    },
+    {
+      "type": "manual_extension",
+      "path": "scripts/manual_catalog_extensions.py"
+    },
+    {
+      "type": "generator",
+      "path": "scripts/build_manual_extensions_security_smart_home.py"
+    },
+    {
+      "type": "data_file",
+      "path": "data/catalog/manual_extensions_security_smart_home.json"
+    },
+    {
+      "type": "market_research",
+      "path": "docs/catalog_market_research_2026-03-26_security_smart_home.md"
+    }
+  ],
+  "market_refresh": {
+    "updated_at": "2026-04-02",
+    "scope": [
+      "PL",
+      "EL",
+      "BT"
+    ],
+    "local_sources": [
+      "ПРАЙС МНЧ 2024.docx",
+      "Прайс 2024 БТ-2 (2).pdf"
+    ],
+    "approach": "Подняты массовые и заниженные позиции, добавлены только прикладные рыночные SKU без бездумного копирования всего прайса конкурента."
+  },
+  "manual_extensions": {
+    "security_and_smart_home": {
+      "updated_at": "2026-03-26",
+      "research_doc": "docs/catalog_market_research_2026-03-26_security_smart_home.md",
+      "professions": [
+        "VS",
+        "SH"
+      ],
+      "items": 49
+    }
+  }
+}
