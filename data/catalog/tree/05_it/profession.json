@@ -1,0 +1,8 @@
+{
+  "code": "IT",
+  "name": "Компьютеры и ноутбуки",
+  "description": "Компьютерная помощь, ремонт ПК, ноутбуков и MacBook.",
+  "icon": "💻",
+  "sort_priority": 5,
+  "is_active": true
+}

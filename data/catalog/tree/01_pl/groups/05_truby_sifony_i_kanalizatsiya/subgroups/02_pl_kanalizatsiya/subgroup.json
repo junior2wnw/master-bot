@@ -1,0 +1,7 @@
+{
+  "code": "pl_kanalizatsiya",
+  "group_code": "truby_sifony_i_kanalizatsiya",
+  "name": "Канализация и стояки",
+  "sort_priority": 2,
+  "is_active": true
+}

@@ -124,3 +124,71 @@ def test_manual_security_and_smart_home_extensions_are_present():
     assert smart_home_item["calc_strategy"] == "PACKAGE"
     assert smart_home_item["source_1"].startswith("https://")
     assert smart_home_item["price_updated_at"] == "2026-03-26"
+
+
+def test_catalog_references_stay_relationally_consistent():
+    bundle = load_catalog_bundle()
+    groups = {entry["code"]: entry for entry in bundle["groups"]}
+    subgroups = {entry["code"]: entry for entry in bundle["subgroups"]}
+
+    for item in bundle["items"]:
+        group = groups[item["group_code"]]
+        subgroup = subgroups[item["subgroup_code"]]
+
+        assert group["profession_code"] == item["profession_code"], item["code"]
+        assert subgroup["group_code"] == item["group_code"], item["code"]
+
+
+def test_catalog_has_no_active_duplicate_item_names_within_direction():
+    bundle = load_catalog_bundle()
+    seen: dict[tuple[str, str], str] = {}
+
+    for item in bundle["items"]:
+        if not item.get("is_active", True):
+            continue
+        key = (item["profession_code"], item["name"])
+        assert key not in seen, (item["code"], seen.get(key), item["name"])
+        seen[key] = item["code"]
+
+
+def test_catalog_has_no_broken_placeholder_text_in_user_visible_fields():
+    bundle = load_catalog_bundle()
+    user_visible_fields = (
+        "name",
+        "description",
+        "aliases",
+        "hashtags",
+        "search_text",
+        "note",
+        "city",
+        "region",
+        "unit",
+    )
+
+    for entry in bundle["professions"]:
+        for field in ("name", "description", "icon"):
+            value = entry.get(field)
+            assert not (isinstance(value, str) and "???" in value), (entry["code"], field, value)
+
+    for entry in bundle["groups"]:
+        value = entry.get("name")
+        assert not (isinstance(value, str) and "???" in value), (entry["code"], "name", value)
+
+    for entry in bundle["subgroups"]:
+        value = entry.get("name")
+        assert not (isinstance(value, str) and "???" in value), (entry["code"], "name", value)
+
+    for entry in bundle["shared_operations"]:
+        for field in ("name", "description", "typical_unit"):
+            value = entry.get(field)
+            assert not (isinstance(value, str) and "???" in value), (entry["code"], field, value)
+
+    for entry in bundle["estimator_fields"]:
+        for field in ("label_ru", "example_options", "applies_to", "why_needed"):
+            value = entry.get(field)
+            assert not (isinstance(value, str) and "???" in value), (entry["field_key"], field, value)
+
+    for item in bundle["items"]:
+        for field in user_visible_fields:
+            value = item.get(field)
+            assert not (isinstance(value, str) and "???" in value), (item["code"], field, value)

@@ -1,0 +1,7 @@
+{
+  "code": "pl_stiralnye_connect",
+  "group_code": "podklyuchenie_bytovoy_tehniki",
+  "name": "Стиральные машины",
+  "sort_priority": 1,
+  "is_active": true
+}

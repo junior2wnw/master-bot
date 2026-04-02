@@ -1,0 +1,7 @@
+{
+  "code": "pl_nasosy_armatura",
+  "group_code": "vodonagrevateli_filtry_i_nasosy",
+  "name": "Насосы и запорная арматура",
+  "sort_priority": 3,
+  "is_active": true
+}

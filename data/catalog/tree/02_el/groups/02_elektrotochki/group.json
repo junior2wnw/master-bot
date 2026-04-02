@@ -1,0 +1,7 @@
+{
+  "code": "elektrotochki",
+  "profession_code": "EL",
+  "name": "Розетки, выключатели и точки",
+  "sort_priority": 2,
+  "is_active": true
+}

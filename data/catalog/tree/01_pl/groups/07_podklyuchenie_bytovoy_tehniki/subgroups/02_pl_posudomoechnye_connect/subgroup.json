@@ -1,0 +1,7 @@
+{
+  "code": "pl_posudomoechnye_connect",
+  "group_code": "podklyuchenie_bytovoy_tehniki",
+  "name": "Посудомоечные машины",
+  "sort_priority": 2,
+  "is_active": true
+}

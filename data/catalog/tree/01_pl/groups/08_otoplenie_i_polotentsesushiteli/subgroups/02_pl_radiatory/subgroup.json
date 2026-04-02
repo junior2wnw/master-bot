@@ -1,0 +1,7 @@
+{
+  "code": "pl_radiatory",
+  "group_code": "otoplenie_i_polotentsesushiteli",
+  "name": "Радиаторы и отопление",
+  "sort_priority": 2,
+  "is_active": true
+}

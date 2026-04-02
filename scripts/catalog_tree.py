@@ -242,6 +242,10 @@ def export_bundle_to_tree(
     clear_root: bool = True,
 ) -> Path:
     tree_root = root or TREE_ROOT
+    readme_backup: str | None = None
+    readme_path = tree_root / "README.md"
+    if readme_path.exists():
+        readme_backup = readme_path.read_text(encoding="utf-8")
     if clear_root and tree_root.exists():
         shutil.rmtree(tree_root)
     tree_root.mkdir(parents=True, exist_ok=True)
@@ -283,6 +287,9 @@ def export_bundle_to_tree(
                     subgroup_dir / "items.json",
                     sorted(items_by_subgroup.get(subgroup["code"], []), key=lambda item: (item.get("sort_order", 0), item["code"])),
                 )
+
+    if readme_backup is not None:
+        readme_path.write_text(readme_backup, encoding="utf-8")
 
     return tree_root
 

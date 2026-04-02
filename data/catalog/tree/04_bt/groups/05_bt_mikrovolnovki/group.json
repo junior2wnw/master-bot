@@ -1,0 +1,7 @@
+{
+  "code": "bt_mikrovolnovki",
+  "profession_code": "BT",
+  "name": "Микроволновые печи",
+  "sort_priority": 5,
+  "is_active": true
+}

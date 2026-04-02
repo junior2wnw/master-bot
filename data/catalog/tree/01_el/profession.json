@@ -1,8 +1,0 @@
-{
-  "code": "EL",
-  "name": "Электрика",
-  "description": "Электромонтаж и бытовая электрика.",
-  "icon": "⚡",
-  "sort_priority": 1,
-  "is_active": true
-}
