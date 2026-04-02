@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
-from scripts.catalog_bundle import BUNDLE_PATH, load_catalog_bundle
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.database import Base
+from app.models.catalog import (
+    Profession,
+    ServiceGroup,
+    ServiceItem,
+    ServiceSubgroup,
+    SharedOperation,
+)
+from app.models.coefficient import Coefficient
+from scripts.catalog_bundle import BUNDLE_PATH, load_catalog_bundle, upsert_catalog_bundle
 from scripts.catalog_tree import build_bundle_from_tree
 
 
@@ -192,3 +205,265 @@ def test_catalog_has_no_broken_placeholder_text_in_user_visible_fields():
         for field in user_visible_fields:
             value = item.get(field)
             assert not (isinstance(value, str) and "???" in value), (item["code"], field, value)
+
+
+@pytest.mark.asyncio
+async def test_upsert_catalog_bundle_deactivates_missing_structure_when_requested():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda sync_conn: Base.metadata.create_all(
+                sync_conn,
+                tables=[
+                    Profession.__table__,
+                    ServiceGroup.__table__,
+                    ServiceSubgroup.__table__,
+                    SharedOperation.__table__,
+                    Coefficient.__table__,
+                    ServiceItem.__table__,
+                ],
+            )
+        )
+
+    async with session_factory() as session:
+        legacy_profession = Profession(
+            code="OLD",
+            name="Legacy",
+            description="legacy profession",
+            icon="x",
+            sort_priority=99,
+            is_active=True,
+        )
+        current_profession = Profession(
+            code="PL",
+            name="Old PL",
+            description="old plumbing",
+            icon="x",
+            sort_priority=5,
+            is_active=True,
+        )
+        session.add_all([legacy_profession, current_profession])
+        await session.flush()
+
+        legacy_group = ServiceGroup(
+            profession_id=current_profession.id,
+            code="old_group",
+            name="Old group",
+            sort_priority=99,
+            is_active=True,
+        )
+        existing_group = ServiceGroup(
+            profession_id=current_profession.id,
+            code="pl_group",
+            name="Outdated group name",
+            sort_priority=10,
+            is_active=True,
+        )
+        session.add_all([legacy_group, existing_group])
+        await session.flush()
+
+        legacy_subgroup = ServiceSubgroup(
+            group_id=legacy_group.id,
+            code="old_subgroup",
+            name="Old subgroup",
+            sort_priority=99,
+            is_active=True,
+        )
+        existing_subgroup = ServiceSubgroup(
+            group_id=existing_group.id,
+            code="pl_subgroup",
+            name="Outdated subgroup name",
+            sort_priority=10,
+            is_active=True,
+        )
+        session.add_all([legacy_subgroup, existing_subgroup])
+        session.add(SharedOperation(
+            code="#OLD_OP",
+            name="Old op",
+            description="legacy op",
+            typical_unit="шт",
+            pricing_strategy="service",
+            is_active=True,
+        ))
+        session.add(Coefficient(
+            coef_type="urgency",
+            coef_key="old_coef",
+            label="Old coef",
+            multiplier=1.1,
+            applies_to="all",
+            when_use="legacy",
+            note="legacy",
+            sort_priority=99,
+            is_active=True,
+        ))
+        session.add(ServiceItem(
+            sort_order=1,
+            profession_id=current_profession.id,
+            group_id=legacy_group.id,
+            subgroup_id=legacy_subgroup.id,
+            code="OLD-ITEM",
+            slug="old-item",
+            name="Old item",
+            description="legacy item",
+            unit="шт",
+            price_min=100,
+            price_max=200,
+            price_recommended=150,
+            currency="RUB",
+            record_type="atomic",
+            calc_strategy="PER_UNIT",
+            selection_mode="quantity",
+            complexity="basic",
+            confidence="HIGH",
+            labor_only=True,
+            aliases="legacy",
+            hashtags="#legacy",
+            search_text="legacy",
+            shared_ops="#OLD_OP",
+            excludes=None,
+            estimator_fields="field_1",
+            note=None,
+            source_1=None,
+            source_2=None,
+            city="Test",
+            region="Test",
+            price_updated_at="2026-04-02",
+            is_popular=False,
+            is_active=True,
+            version=1,
+        ))
+        await session.commit()
+
+        bundle = {
+            "professions": [
+                {
+                    "code": "PL",
+                    "name": "Сантехника",
+                    "description": "Проверка sync-импорта",
+                    "icon": "🚿",
+                    "sort_priority": 1,
+                    "is_active": True,
+                }
+            ],
+            "groups": [
+                {
+                    "code": "pl_group",
+                    "profession_code": "PL",
+                    "name": "Группа",
+                    "sort_priority": 1,
+                    "is_active": True,
+                }
+            ],
+            "subgroups": [
+                {
+                    "code": "pl_subgroup",
+                    "group_code": "pl_group",
+                    "name": "Подгруппа",
+                    "sort_priority": 1,
+                    "is_active": True,
+                }
+            ],
+            "shared_operations": [
+                {
+                    "code": "#CALL_OUT",
+                    "name": "Выезд",
+                    "description": "Базовый выезд",
+                    "typical_unit": "усл.",
+                    "pricing_strategy": "service",
+                    "is_active": True,
+                }
+            ],
+            "coefficients": [
+                {
+                    "coef_type": "urgency",
+                    "coef_key": "urgent",
+                    "label": "Срочно",
+                    "multiplier": 1.2,
+                    "applies_to": "all",
+                    "when_use": "Когда нужен срочный выезд",
+                    "note": None,
+                    "sort_priority": 1,
+                    "is_active": True,
+                }
+            ],
+            "items": [
+                {
+                    "code": "PL-ITEM",
+                    "slug": "pl-item",
+                    "name": "Новая работа",
+                    "description": "Актуальная работа",
+                    "sort_order": 1,
+                    "profession_code": "PL",
+                    "group_code": "pl_group",
+                    "subgroup_code": "pl_subgroup",
+                    "unit": "шт",
+                    "price_min": 500,
+                    "price_max": 900,
+                    "price_recommended": 700,
+                    "currency": "RUB",
+                    "record_type": "atomic",
+                    "calc_strategy": "PER_UNIT",
+                    "selection_mode": "quantity",
+                    "complexity": "basic",
+                    "confidence": "HIGH",
+                    "labor_only": True,
+                    "aliases": "новая",
+                    "hashtags": "#новая",
+                    "search_text": "новая работа",
+                    "shared_ops": "#CALL_OUT",
+                    "excludes": None,
+                    "estimator_fields": "field_1",
+                    "note": None,
+                    "source_1": None,
+                    "source_2": None,
+                    "city": "Тест",
+                    "region": "Тест",
+                    "price_updated_at": "2026-04-02",
+                    "is_popular": True,
+                    "is_active": True,
+                    "version": 1,
+                }
+            ],
+        }
+
+        stats = await upsert_catalog_bundle(session, bundle, deactivate_missing=True)
+        await session.commit()
+
+        assert stats["professions_deactivated"] == 1
+        assert stats["groups_deactivated"] == 1
+        assert stats["subgroups_deactivated"] == 1
+        assert stats["shared_ops_deactivated"] == 1
+        assert stats["coefficients_deactivated"] == 1
+        assert stats["items_deactivated"] == 1
+
+        assert (
+            await session.execute(select(Profession.is_active).where(Profession.code == "OLD"))
+        ).scalar_one() is False
+        assert (
+            await session.execute(select(ServiceGroup.is_active).where(ServiceGroup.code == "old_group"))
+        ).scalar_one() is False
+        assert (
+            await session.execute(select(ServiceSubgroup.is_active).where(ServiceSubgroup.code == "old_subgroup"))
+        ).scalar_one() is False
+        assert (
+            await session.execute(select(SharedOperation.is_active).where(SharedOperation.code == "#OLD_OP"))
+        ).scalar_one() is False
+        assert (
+            await session.execute(select(Coefficient.is_active).where(Coefficient.coef_key == "old_coef"))
+        ).scalar_one() is False
+        assert (
+            await session.execute(select(ServiceItem.is_active).where(ServiceItem.code == "OLD-ITEM"))
+        ).scalar_one() is False
+        assert (
+            await session.execute(select(ServiceGroup.name).where(ServiceGroup.code == "pl_group"))
+        ).scalar_one() == "Группа"
+        assert (
+            await session.execute(select(ServiceSubgroup.name).where(ServiceSubgroup.code == "pl_subgroup"))
+        ).scalar_one() == "Подгруппа"
+        assert (
+            await session.execute(select(ServiceItem.is_active).where(ServiceItem.code == "PL-ITEM"))
+        ).scalar_one() is True
+
+    await engine.dispose()

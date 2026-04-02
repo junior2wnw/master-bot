@@ -62,14 +62,19 @@ async def upsert_catalog_bundle(
     stats = {
         "professions_created": 0,
         "professions_updated": 0,
+        "professions_deactivated": 0,
         "groups_created": 0,
         "groups_updated": 0,
+        "groups_deactivated": 0,
         "subgroups_created": 0,
         "subgroups_updated": 0,
+        "subgroups_deactivated": 0,
         "shared_ops_created": 0,
         "shared_ops_updated": 0,
+        "shared_ops_deactivated": 0,
         "coefficients_created": 0,
         "coefficients_updated": 0,
+        "coefficients_deactivated": 0,
         "items_created": 0,
         "items_updated": 0,
         "items_deactivated": 0,
@@ -213,6 +218,11 @@ async def upsert_catalog_bundle(
             stats["coefficients_created"] += 1
     await session.flush()
 
+    profession_codes = {entry["code"] for entry in bundle["professions"]}
+    group_codes = {entry["code"] for entry in bundle["groups"]}
+    subgroup_codes = {entry["code"] for entry in bundle["subgroups"]}
+    shared_op_codes = {entry["code"] for entry in bundle["shared_operations"]}
+    coefficient_keys = {entry["coef_key"] for entry in bundle["coefficients"]}
     bundle_codes = {entry["code"] for entry in bundle["items"]}
     for entry in bundle["items"]:
         profession_id = profession_ids[entry["profession_code"]]
@@ -271,10 +281,38 @@ async def upsert_catalog_bundle(
 
     await session.flush()
 
-    if deactivate_missing and bundle_codes:
-        result = await session.execute(
-            select(ServiceItem).where(ServiceItem.is_active)
-        )
+    if deactivate_missing:
+        result = await session.execute(select(Profession).where(Profession.is_active))
+        for profession in result.scalars().all():
+            if profession.code not in profession_codes:
+                profession.is_active = False
+                stats["professions_deactivated"] += 1
+
+        result = await session.execute(select(ServiceGroup).where(ServiceGroup.is_active))
+        for group in result.scalars().all():
+            if group.code not in group_codes:
+                group.is_active = False
+                stats["groups_deactivated"] += 1
+
+        result = await session.execute(select(ServiceSubgroup).where(ServiceSubgroup.is_active))
+        for subgroup in result.scalars().all():
+            if subgroup.code not in subgroup_codes:
+                subgroup.is_active = False
+                stats["subgroups_deactivated"] += 1
+
+        result = await session.execute(select(SharedOperation).where(SharedOperation.is_active))
+        for operation in result.scalars().all():
+            if operation.code not in shared_op_codes:
+                operation.is_active = False
+                stats["shared_ops_deactivated"] += 1
+
+        result = await session.execute(select(Coefficient).where(Coefficient.is_active))
+        for coefficient in result.scalars().all():
+            if coefficient.coef_key not in coefficient_keys:
+                coefficient.is_active = False
+                stats["coefficients_deactivated"] += 1
+
+        result = await session.execute(select(ServiceItem).where(ServiceItem.is_active))
         for item in result.scalars().all():
             if item.code not in bundle_codes:
                 item.is_active = False
