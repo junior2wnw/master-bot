@@ -1,7 +1,7 @@
 {
   "code": "podklyuchenie_bytovoy_tehniki",
   "profession_code": "PL",
-  "name": "Подключение бытовой техники",
+  "name": "Подключение техники к воде и канализации",
   "sort_priority": 7,
   "is_active": true
 }

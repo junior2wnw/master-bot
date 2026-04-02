@@ -207,6 +207,42 @@ def test_catalog_has_no_broken_placeholder_text_in_user_visible_fields():
             assert not (isinstance(value, str) and "???" in value), (item["code"], field, value)
 
 
+def test_catalog_semantic_deduplication_rules_are_kept():
+    bundle = load_catalog_bundle()
+    groups = {entry["code"]: entry["name"] for entry in bundle["groups"]}
+    subgroups = {entry["code"]: entry["name"] for entry in bundle["subgroups"]}
+    items = {entry["code"]: entry for entry in bundle["items"]}
+
+    assert groups["smesiteli_i_dush"] == "Смесители и душевые аксессуары"
+    assert groups["vodonagrevateli_filtry_i_nasosy"] == "Монтаж водонагревателей, фильтров и насосов"
+    assert groups["podklyuchenie_bytovoy_tehniki"] == "Подключение техники к воде и канализации"
+    assert groups["el_servis_i_diagnostika"] == "Выезд и первичная диагностика"
+    assert groups["podklyuchenie_tehniki"] == "Подключение техники к электросети"
+    assert groups["podgotovka_osnovaniy"] == "Поиск неисправностей, штробы и отверстия"
+    assert groups["bt_vodonagrevateli"] == "Ремонт водонагревателей"
+
+    assert subgroups["el_vyezd_i_diagnostika"] == "Диагностика на объекте"
+    assert subgroups["moduli"] == "Кухонные модули"
+    assert subgroups["ofis"] == "Офисная мебель"
+    assert subgroups["torgovaya"] == "Торговая мебель и оборудование"
+    assert subgroups["prochee"] == "Мебель IKEA"
+    assert subgroups["bt_wh_servis"] == "Диагностика, чистка и ремонт"
+
+    assert items["PL-SNK-MOIDODIR-INSTALL"]["is_active"] is False
+    assert items["PL-SNK-SINK-KITCHEN"]["is_active"] is False
+    assert items["FM-KIT-HANDLE"]["is_active"] is False
+
+    assert items["PL-WM-CONNECT"]["name"] == "Подключение стиральной машины на готовые коммуникации"
+    assert items["PL-WM-INSTALL"]["name"] == "Установка и подключение стиральной машины"
+    assert items["PL-DW-CONNECT"]["name"] == "Подключение посудомоечной машины на готовые коммуникации"
+    assert items["PL-DW-INSTALL"]["name"] == "Установка и подключение посудомоечной машины"
+    assert items["PL-SHWR-CABIN-ASSEMBLY"]["name"] == "Сборка душевой кабины без подключения"
+    assert items["PL-SHWR-CABIN-INSTALL"]["name"] == "Установка и подключение душевой кабины"
+    assert items["EL-APP-HOB-CONN"]["name"] == "Подключение варочной панели к электросети"
+    assert items["EL-APP-HOB-INST"]["name"] == "Установка варочной панели без подключения"
+    assert items["FM-HW-HANDLE"]["aliases"] and "кухне" in items["FM-HW-HANDLE"]["aliases"]
+
+
 @pytest.mark.asyncio
 async def test_upsert_catalog_bundle_deactivates_missing_structure_when_requested():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

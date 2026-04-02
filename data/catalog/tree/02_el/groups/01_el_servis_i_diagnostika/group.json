@@ -1,7 +1,7 @@
 {
   "code": "el_servis_i_diagnostika",
   "profession_code": "EL",
-  "name": "Выезд и диагностика",
+  "name": "Выезд и первичная диагностика",
   "sort_priority": 1,
   "is_active": true
 }

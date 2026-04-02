@@ -1,7 +1,7 @@
 {
   "code": "podklyuchenie_tehniki",
   "profession_code": "EL",
-  "name": "Подключение техники",
+  "name": "Подключение техники к электросети",
   "sort_priority": 6,
   "is_active": true
 }
