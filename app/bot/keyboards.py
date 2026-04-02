@@ -217,14 +217,12 @@ def professions_list(professions: list[dict]) -> InlineKeyboardMarkup:
 
 def groups_list(groups: list[dict], profession_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    btns = []
     for g in groups:
         count = f" ({g['count']})" if g.get("count") else ""
-        btns.append(InlineKeyboardButton(
-            text=fit_button_text(g["name"], max_len=20, suffix=count),
+        kb.row(InlineKeyboardButton(
+            text=f"{g['name']}{count}",
             callback_data=f"grp:{g['id']}",
         ))
-    grid_buttons(btns, kb, columns=2)
     add_back_row(kb, "Направления", "catalog")
     return kb.as_markup()
 

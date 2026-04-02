@@ -140,6 +140,32 @@ def test_catalog_buttons_truncate_long_titles():
     assert "…" in text
 
 
+def test_catalog_group_buttons_use_single_column_without_truncation():
+    markup = keyboards.groups_list(
+        [
+            {
+                "id": 11,
+                "name": "Очень длинная категория сантехнических и сопутствующих монтажных работ",
+                "count": 12,
+            },
+            {
+                "id": 12,
+                "name": "Еще одна длинная категория по ремонту и подключению техники",
+                "count": 3,
+            },
+        ],
+        profession_id=7,
+    )
+
+    rows = markup.inline_keyboard
+    assert len(rows[0]) == 1
+    assert len(rows[1]) == 1
+    assert rows[0][0].text == "Очень длинная категория сантехнических и сопутствующих монтажных работ (12)"
+    assert rows[1][0].text == "Еще одна длинная категория по ремонту и подключению техники (3)"
+    assert "…" not in rows[0][0].text
+    assert "…" not in rows[1][0].text
+
+
 def test_admin_user_detail_shows_staffing_button_when_explicitly_allowed():
     markup = keyboards.admin_user_detail(42, ["admin"], can_staff=True)
 
