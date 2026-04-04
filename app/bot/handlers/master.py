@@ -30,6 +30,7 @@ from app.services.discount import create_discount_request
 from app.services.estimate import (
     add_line_item,
     create_estimate,
+    delete_estimate as delete_estimate_service,
     update_estimate_status,
 )
 from app.services.notification import notify_estimate_for_review
@@ -504,6 +505,52 @@ async def cb_clear_estimate(callback: CallbackQuery, session: AsyncSession) -> N
     await callback.answer("🗑 Смета очищена")
 
 
+@router.callback_query(F.data.startswith("est_delete_prompt:"))
+async def cb_delete_estimate_prompt(callback: CallbackQuery, session: AsyncSession) -> None:
+    estimate_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate_for_edit(session, user, estimate_id)
+    est_data = await _load_estimate_data(session, estimate_id) if estimate else None
+    if not estimate or not est_data:
+        await callback.answer("Смета не найдена", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="🗑 Да, удалить", callback_data=f"est_delete:{estimate_id}"),
+        InlineKeyboardButton(text="← К смете", callback_data=f"est_view:{estimate_id}"),
+    )
+
+    await callback.message.edit_text(
+        messages.estimate_delete_confirmation(est_data),
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("est_delete:"))
+async def cb_delete_estimate(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    estimate_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    try:
+        await delete_estimate_service(session, estimate_id=estimate_id, user_id=user.id)
+    except Exception as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    await state.clear()
+    await _show_estimates_list(callback, session, user, page=1)
+    await callback.answer("🗑 Смета удалена")
+
+
 # ═══════════════════════════════════════════════════════════════
 # SEARCH WITHIN ESTIMATE
 # ═══════════════════════════════════════════════════════════════
@@ -732,18 +779,11 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
         await state.clear()
         return
 
-    parts = message.text.strip().split(maxsplit=2)
-    if len(parts) < 3:
-        await message.answer("⚠️ Формат: <code>% 10 Причина</code> или <code>₽ 500 Причина</code>")
-        return
-
-    type_word, value_str, reason = parts
-    discount_type = "percent" if "%" in type_word else "fixed"
-
+    raw_value = message.text.strip().replace("%", "").replace(",", ".")
     try:
-        discount_value = float(value_str)
+        discount_value = float(raw_value)
     except ValueError:
-        await message.answer("⚠️ Некорректное значение скидки")
+        await message.answer("⚠️ Укажите только процент скидки числом. Например: <code>10</code> или <code>12.5</code>")
         return
 
     user = await get_user_by_telegram_id(session, message.from_user.id)
@@ -755,9 +795,8 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
             session,
             estimate_id=estimate_id,
             requested_by=user,
-            discount_type=discount_type,
+            discount_type="percent",
             discount_value=discount_value,
-            reason=reason,
         )
         approver_note = (
             "Уведомление отправлено в очередь согласования."
@@ -765,8 +804,7 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
             else "Запрос создан, но согласующий пока не назначен."
         )
         await message.answer(
-            f"✅ Запрос на скидку отправлен\n"
-            f"Тип: {discount_type}, Размер: {discount_value}, Причина: {reason}\n"
+            f"✅ Скидка обновлена до <b>{float(dr.discount_value):g}%</b>\n"
             f"{approver_note}"
         )
     except Exception as e:

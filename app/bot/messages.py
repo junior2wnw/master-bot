@@ -264,6 +264,19 @@ def estimate_sent_to_client(estimate_id: int, client_name: str) -> str:
     )
 
 
+def estimate_delete_confirmation(estimate: dict) -> str:
+    items_count = len(estimate.get("items", []))
+    estimate_id = estimate.get("id", "")
+    return (
+        f"{header('❌', f'Удалить смету #{estimate_id}')}\n"
+        f"{THIN_LINE}\n"
+        f"Позиций: <b>{items_count}</b>\n"
+        f"Итого: <b>{money(estimate.get('final', 0))}</b>\n\n"
+        "Смета-черновик будет удалена полностью. "
+        "Вернуть её после удаления нельзя."
+    )
+
+
 def estimate_for_review(estimate: dict) -> str:
     text = (
         f"📩 <b>Новая смета на согласование</b>\n"
@@ -404,24 +417,23 @@ def commission_report(data: dict) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def discount_request_info(dr: dict) -> str:
-    type_label = "%" if dr["type"] == "percent" else "₽"
+    type_label = "%" if dr.get("type", "percent") == "percent" else "₽"
     return (
         f"{header('💸', 'Запрос на скидку')}\n"
         f"{THIN_LINE}\n"
         f"Смета: #{dr['estimate_id']}\n"
         f"Мастер: {dr['master_name']}\n"
         f"Скидка: <b>{dr['value']}{type_label}</b>\n"
-        f"Причина: {dr['reason']}\n"
     )
 
 
 def discount_request_prompt() -> str:
     return (
         f"{header('💸', 'Запрос на скидку')}\n\n"
-        "Введите в формате:\n"
-        "<code>% 10 Постоянный клиент</code>\n"
-        "или\n"
-        "<code>₽ 500 Мелкие доработки</code>"
+        "Введите только процент скидки.\n"
+        "Причина не требуется.\n\n"
+        "Примеры: <code>10</code>, <code>12.5</code>, <code>15%</code>\n"
+        "Максимум: <b>50%</b>"
     )
 
 

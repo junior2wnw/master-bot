@@ -29,6 +29,15 @@ def test_estimate_actions_include_position_editor_for_draft_master():
     assert "est_items:12:1" in callbacks
 
 
+def test_estimate_actions_include_delete_for_editable_draft():
+    markup = keyboards.estimate_actions(estimate_id=12, is_master=True, status="draft")
+    texts = _texts(markup)
+    callbacks = _callbacks(markup)
+
+    assert "❌ Удалить смету" in texts
+    assert "est_delete_prompt:12" in callbacks
+
+
 def test_estimate_items_list_links_to_item_editor():
     markup = keyboards.estimate_items_list(
         estimate_id=17,
@@ -81,6 +90,8 @@ def test_main_menu_master_gets_orders_from_permission_matrix():
 
     assert "📝 Заказы (2)" in texts
     assert "my_orders" in callbacks
+    assert "💡 Предложения" in texts
+    assert "project_suggestion" in callbacks
 
 
 def test_main_menu_owner_gets_admin_and_owner_sections():
@@ -95,6 +106,8 @@ def test_main_menu_owner_gets_admin_and_owner_sections():
     assert "📈 Мониторинг" in texts
     assert "admin_panel" in callbacks
     assert "owner_panel" in callbacks
+    assert "💡 Предложения" in texts
+    assert "project_suggestion" in callbacks
 
 
 def test_profile_actions_owner_inherits_master_admin_and_owner_sections():
@@ -115,6 +128,8 @@ def test_profile_actions_owner_inherits_master_admin_and_owner_sections():
     assert "profile_requisites" in callbacks
     assert "profile_role_mode" in callbacks
     assert "owner_panel" in callbacks
+    assert "💡 Предложения" in texts
+    assert "project_suggestion" in callbacks
 
 
 def test_order_list_hides_create_button_without_permission():

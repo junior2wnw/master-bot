@@ -99,7 +99,10 @@ def main_menu(roles: list[str], summary: dict | None = None) -> InlineKeyboardMa
     if has_permission_for_roles(roles, Permission.OWNER_PANEL):
         kb.row(InlineKeyboardButton(text="📈 Мониторинг", callback_data="owner_panel"))
 
-    kb.row(InlineKeyboardButton(text="👤 Профиль", callback_data="profile"))
+    kb.row(
+        InlineKeyboardButton(text="💡 Предложения", callback_data="project_suggestion"),
+        InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
+    )
     return kb.as_markup()
 
 
@@ -151,6 +154,7 @@ def profile_actions(
     if can_switch_role:
         kb.row(InlineKeyboardButton(text="🎭 Режим роли", callback_data="profile_role_mode"))
 
+    kb.row(InlineKeyboardButton(text="💡 Предложения", callback_data="project_suggestion"))
     add_back_row(kb, "Меню", "main_menu")
     return kb.as_markup()
 
@@ -331,6 +335,7 @@ def estimate_actions(
     kb = InlineKeyboardBuilder()
     caps = {
         "can_edit": is_master,
+        "can_delete": is_master,
         "can_client_respond": status == "client_review",
         "can_create_order": False,
         "can_export": True,
@@ -351,6 +356,10 @@ def estimate_actions(
             InlineKeyboardButton(text="📤 Клиенту", callback_data=f"est_send:{estimate_id}"),
             InlineKeyboardButton(text="🗑 Очистить", callback_data=f"est_clear:{estimate_id}"),
         )
+        if caps["can_delete"]:
+            kb.row(
+                InlineKeyboardButton(text="❌ Удалить смету", callback_data=f"est_delete_prompt:{estimate_id}")
+            )
 
     if status == "client_review" and caps["can_client_respond"]:
         kb.row(

@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, messages
-from app.bot.ui import fit_button_text
+from app.bot.ui import add_pagination_row, fit_button_text
 from app.config import get_settings
 from app.core.security import (
     Permission,
@@ -33,7 +33,10 @@ from app.services.profile import (
     update_profile_fields,
 )
 from app.services.role_context import build_role_context_payload, set_active_role
+from app.services.suggestion import create_project_suggestion
 from app.services.workspace import (
+    count_notifications_for_user,
+    count_unread_notifications_for_user,
     get_action_items,
     get_dashboard_data,
     list_notifications_for_user,
@@ -44,10 +47,15 @@ from app.services.workspace import (
 )
 
 router = Router()
+NOTIFICATIONS_PER_PAGE = 8
 
 
 class ProfileStates(StatesGroup):
     editing_field = State()
+
+
+class SuggestionStates(StatesGroup):
+    composing = State()
 
 
 async def _show_main_menu(
@@ -186,24 +194,52 @@ async def cb_workbench(callback: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data == "inbox")
 async def cb_inbox(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await _show_inbox(callback, session, page=1):
+        await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^inbox:(\d+)$"))
+async def cb_inbox_page(callback: CallbackQuery, session: AsyncSession) -> None:
+    page = int(callback.data.split(":")[1])
+    if await _show_inbox(callback, session, page=page):
+        await callback.answer()
+
+
+async def _show_inbox(callback: CallbackQuery, session: AsyncSession, *, page: int) -> bool:
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
         await callback.answer("Пользователь не найден", show_alert=True)
-        return
+        return False
 
-    notifications = await list_notifications_for_user(session, user_id=user.id, limit=20)
-    payload = [serialize_notification(item) for item in notifications]
-    unread_count = sum(1 for item in payload if item["is_unread"])
-    await callback.message.edit_text(
-        _render_inbox(payload, unread_count),
-        reply_markup=_notifications_markup(payload),
+    total_count = await count_notifications_for_user(session, user_id=user.id)
+    unread_count = await count_unread_notifications_for_user(session, user_id=user.id)
+    total_pages = max(1, (total_count + NOTIFICATIONS_PER_PAGE - 1) // NOTIFICATIONS_PER_PAGE)
+    page = max(1, min(page, total_pages))
+    notifications = await list_notifications_for_user(
+        session,
+        user_id=user.id,
+        limit=NOTIFICATIONS_PER_PAGE,
+        offset=(page - 1) * NOTIFICATIONS_PER_PAGE,
     )
-    await callback.answer()
+    payload = [serialize_notification(item) for item in notifications]
+    await callback.message.edit_text(
+        _render_inbox(
+            payload,
+            unread_count,
+            page=page,
+            total_pages=total_pages,
+            total_count=total_count,
+        ),
+        reply_markup=_notifications_markup(payload, page=page, total_pages=total_pages),
+    )
+    return True
 
 
 @router.callback_query(F.data.startswith("notif_open:"))
 async def cb_notification_open(callback: CallbackQuery, session: AsyncSession) -> None:
-    notification_id = int(callback.data.split(":")[1])
+    parts = callback.data.split(":")
+    notification_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 1
     user = await get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
         await callback.answer("Пользователь не найден", show_alert=True)
@@ -222,7 +258,11 @@ async def cb_notification_open(callback: CallbackQuery, session: AsyncSession) -
     target_label = resolve_notification_target_label(notification)
     await callback.message.edit_text(
         _render_notification_detail(serialize_notification(notification)),
-        reply_markup=_notification_detail_markup(target_callback, target_label),
+        reply_markup=_notification_detail_markup(
+            target_callback,
+            target_label,
+            back_callback=f"inbox:{page}",
+        ),
     )
     await callback.answer()
 
@@ -278,6 +318,75 @@ async def cb_profile(callback: CallbackQuery, session: AsyncSession) -> None:
         ),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "project_suggestion")
+async def cb_project_suggestion(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    await state.set_state(SuggestionStates.composing)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))
+
+    await callback.message.edit_text(
+        "💡 <b>Предложения по улучшению</b>\n\n"
+        "Напишите одним сообщением идею, неудобство или баг.\n"
+        "Текст сохранится и уйдёт разработчикам во внутренние уведомления.\n\n"
+        "Лучше сразу писать по сути: что сейчас неудобно, где это видно и как должно работать.",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.message(SuggestionStates.composing)
+async def msg_project_suggestion(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    user = await get_user_by_telegram_id(session, message.from_user.id)
+    if not user:
+        await state.clear()
+        await message.answer("⚠️ Пользователь не найден")
+        return
+
+    try:
+        suggestion, recipient_count = await create_project_suggestion(
+            session,
+            author=user,
+            message=message.text or "",
+            source="telegram_bot",
+        )
+    except Exception as exc:
+        await message.answer(f"⚠️ {exc}")
+        return
+
+    await state.clear()
+
+    recipients_text = (
+        f"Уведомлений отправлено адресатам: <b>{recipient_count}</b>."
+        if recipient_count
+        else "Предложение сохранено. Получатели пока не настроены."
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="💡 Ещё предложение", callback_data="project_suggestion"),
+        InlineKeyboardButton(text="← Меню", callback_data="main_menu"),
+    )
+    await message.answer(
+        "✅ <b>Предложение отправлено</b>\n\n"
+        f"Номер: <b>#{suggestion.id}</b>\n"
+        f"{recipients_text}",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(F.data == "profile_role_mode")
@@ -535,7 +644,7 @@ def _action_center_markup(actions: list[dict]):
     return kb.as_markup()
 
 
-def _notifications_markup(notifications: list[dict]):
+def _notifications_markup(notifications: list[dict], *, page: int, total_pages: int):
     kb = InlineKeyboardBuilder()
     for item in notifications:
         prefix = "🔔" if item.get("is_unread") else "✅"
@@ -544,18 +653,24 @@ def _notifications_markup(notifications: list[dict]):
                 f"{prefix} {item.get('title', 'Уведомление')}",
                 max_len=34,
             ),
-            callback_data=f"notif_open:{item['id']}",
+            callback_data=f"notif_open:{item['id']}:{page}",
         ))
+    add_pagination_row(kb, page, total_pages, "inbox")
     kb.row(InlineKeyboardButton(text="← Меню", callback_data="main_menu"))
     return kb.as_markup()
 
 
-def _notification_detail_markup(target_callback: str, target_label: str | None):
+def _notification_detail_markup(
+    target_callback: str,
+    target_label: str | None,
+    *,
+    back_callback: str = "inbox:1",
+):
     kb = InlineKeyboardBuilder()
     if target_callback and target_label:
         kb.row(InlineKeyboardButton(text=f"➡️ {target_label}", callback_data=target_callback))
     kb.row(
-        InlineKeyboardButton(text="🔔 Все уведомления", callback_data="inbox"),
+        InlineKeyboardButton(text="🔔 К уведомлениям", callback_data=back_callback),
         InlineKeyboardButton(text="← Меню", callback_data="main_menu"),
     )
     return kb.as_markup()
@@ -582,15 +697,26 @@ def _render_action_center(actions: list[dict], unread_count: int) -> str:
     return "\n".join(lines)
 
 
-def _render_inbox(notifications: list[dict], unread_count: int) -> str:
+def _render_inbox(
+    notifications: list[dict],
+    unread_count: int,
+    *,
+    page: int,
+    total_pages: int,
+    total_count: int,
+) -> str:
     if not notifications:
         return "🔔 <b>Уведомления</b>\n\nПока пусто. Когда потребуется действие, бот пришлёт его сюда."
 
-    lines = [f"🔔 <b>Уведомления</b>\nНепрочитанных: <b>{unread_count}</b>\n"]
-    for item in notifications[:8]:
+    lines = [
+        "🔔 <b>Уведомления</b>",
+        f"Непрочитанных: <b>{unread_count}</b>",
+        f"Страница: <b>{page}/{total_pages}</b> • Всего: <b>{total_count}</b>\n",
+    ]
+    for item in notifications:
         marker = "•" if item.get("is_unread") else "◦"
         lines.append(f"{marker} <b>{item['title']}</b>")
-    lines.append("\nОткройте карточку, и бот переведёт вас сразу к нужному экрану.")
+    lines.append("\nОткройте карточку, чтобы посмотреть полный текст и листать историю дальше.")
     return "\n".join(lines)
 
 

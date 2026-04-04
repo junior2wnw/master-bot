@@ -10,6 +10,7 @@ from app.models.discount import DiscountRequest
 from app.models.order import Order, OrderStatusHistory
 from app.models.payment import Payment, CommissionPolicy, CommissionRecord
 from app.models.notification import Notification, NotificationTemplate
+from app.models.project_suggestion import ProjectSuggestion
 from app.models.approval import ApprovalRequest
 from app.models.staffing import StaffingAction
 from app.models.audit import AuditLog
@@ -27,6 +28,7 @@ __all__ = [
     "Order", "OrderStatusHistory",
     "Payment", "CommissionPolicy", "CommissionRecord",
     "Notification", "NotificationTemplate",
+    "ProjectSuggestion",
     "ApprovalRequest",
     "StaffingAction",
     "AuditLog",

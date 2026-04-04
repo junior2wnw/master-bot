@@ -14,6 +14,35 @@ from app.models.estimate import Estimate, EstimateDiscount, EstimateLineItem, Es
 from app.models.hierarchy import BranchMember
 from app.models.user import User
 
+PERCENT_DISCOUNT_MAX = 50
+
+
+def normalize_discount_request_input(
+    *,
+    discount_type: str,
+    discount_value: float,
+    scope: str,
+) -> tuple[str, float, str]:
+    normalized_type = (discount_type or "").strip().lower()
+    normalized_scope = (scope or "estimate").strip().lower()
+
+    if normalized_type != "percent":
+        raise ValidationError("Доступна только процентная скидка")
+    if normalized_scope not in ("estimate", "line_item"):
+        raise ValidationError("Область скидки должна быть 'estimate' или 'line_item'")
+
+    try:
+        normalized_value = float(discount_value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Размер скидки должен быть числом") from exc
+
+    if normalized_value <= 0:
+        raise ValidationError("Размер скидки должен быть больше 0")
+    if normalized_value > PERCENT_DISCOUNT_MAX:
+        raise ValidationError(f"Скидка не может превышать {PERCENT_DISCOUNT_MAX}%")
+
+    return normalized_type, normalized_value, normalized_scope
+
 
 async def create_discount_request(
     session: AsyncSession,
@@ -22,58 +51,92 @@ async def create_discount_request(
     requested_by: User,
     discount_type: str,
     discount_value: float,
-    reason: str,
+    reason: str | None = None,
     comment: str | None = None,
     scope: str = "estimate",
     line_item_id: int | None = None,
 ) -> DiscountRequest:
     """Master requests a discount and routes it to the assigned approver."""
-    if discount_type not in ("percent", "fixed"):
-        raise ValidationError("Тип скидки должен быть 'percent' или 'fixed'")
-    if scope not in ("estimate", "line_item"):
-        raise ValidationError("Область скидки должна быть 'estimate' или 'line_item'")
+    discount_type, discount_value, scope = normalize_discount_request_input(
+        discount_type=discount_type,
+        discount_value=discount_value,
+        scope=scope,
+    )
     if scope == "line_item" and not line_item_id:
         raise ValidationError("Для скидки по позиции нужно указать line_item_id")
-    if discount_value <= 0:
-        raise ValidationError("Размер скидки должен быть больше 0")
-    if discount_type == "percent" and discount_value > 50:
-        raise ValidationError("Скидка не может превышать 50%")
-    if not reason or len(reason.strip()) < 3:
-        raise ValidationError("Укажите причину скидки")
+
+    normalized_reason = (reason or "").strip()
 
     approver_id = await _find_approver(session, requested_by)
     if approver_id is None:
         raise ValidationError("Нет доступного согласующего для скидки")
     estimate = await _get_estimate(session, estimate_id)
 
-    request = DiscountRequest(
-        estimate_id=estimate_id,
-        requested_by=requested_by.id,
-        discount_type=discount_type,
-        discount_value=discount_value,
-        scope=scope,
-        line_item_id=line_item_id,
-        reason=reason,
-        comment=comment,
-        assigned_to=approver_id,
-        status="pending",
-    )
-    session.add(request)
+    existing_requests = list((
+        await session.execute(
+            select(DiscountRequest)
+            .where(
+                DiscountRequest.estimate_id == estimate_id,
+                DiscountRequest.requested_by == requested_by.id,
+                DiscountRequest.status == "pending",
+                DiscountRequest.scope == scope,
+                DiscountRequest.line_item_id == line_item_id,
+            )
+            .order_by(DiscountRequest.created_at.desc(), DiscountRequest.id.desc())
+        )
+    ).scalars().all())
+
+    now = datetime.now(UTC)
+    request = existing_requests[0] if existing_requests else None
+    for stale_request in existing_requests[1:]:
+        stale_request.status = "rejected"
+        stale_request.resolution_comment = "Заменено новым значением скидки"
+        stale_request.resolved_by = requested_by.id
+        stale_request.resolved_at = now
+
+    created_new_request = request is None
+    if request is None:
+        request = DiscountRequest(
+            estimate_id=estimate_id,
+            requested_by=requested_by.id,
+            discount_type=discount_type,
+            discount_value=discount_value,
+            scope=scope,
+            line_item_id=line_item_id,
+            reason=normalized_reason,
+            comment=comment,
+            assigned_to=approver_id,
+            status="pending",
+        )
+        session.add(request)
+    else:
+        request.discount_type = discount_type
+        request.discount_value = discount_value
+        request.scope = scope
+        request.line_item_id = line_item_id
+        request.reason = normalized_reason
+        request.comment = comment
+        request.assigned_to = approver_id
+        request.status = "pending"
+        request.resolved_by = None
+        request.resolution_comment = None
+        request.resolved_at = None
+        request.created_at = now
     await session.flush()
 
     await log_audit(
         session,
         user_id=requested_by.id,
-        action="discount.requested",
+        action="discount.requested" if created_new_request else "discount.request_updated",
         entity_type="discount_request",
         entity_id=request.id,
         new_value={
             "type": discount_type,
             "value": float(discount_value),
-            "reason": reason,
             "approver_id": approver_id,
             "scope": scope,
             "line_item_id": line_item_id,
+            "updated_existing": not created_new_request,
         },
     )
 
@@ -340,7 +403,7 @@ async def _apply_discount_to_estimate(
         session,
         estimate_id=estimate.id,
         created_by=approver.id,
-        reason=f"Одобрена скидка: {request.reason}",
+        reason=f"Одобрено изменение скидки: {float(request.discount_value):g}%",
         copy_items=True,
     )
     if source_line_item is not None:
@@ -350,13 +413,26 @@ async def _apply_discount_to_estimate(
             version_id=new_version.id,
         )
 
+    if request.scope == "estimate":
+        copied_discounts = (
+            await session.execute(
+                select(EstimateDiscount).where(
+                    EstimateDiscount.version_id == new_version.id,
+                    EstimateDiscount.applied_to_line_item_id.is_(None),
+                )
+            )
+        ).scalars().all()
+        for copied_discount in copied_discounts:
+            await session.delete(copied_discount)
+        await session.flush()
+
     session.add(EstimateDiscount(
         version_id=new_version.id,
         discount_request_id=request.id,
         discount_type=request.discount_type,
         discount_value=request.discount_value,
         amount=amount,
-        reason=request.reason,
+        reason=None,
         applied_to_line_item_id=applied_to_line_item_id,
     ))
     await session.flush()

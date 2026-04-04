@@ -15,6 +15,14 @@ const state = {
   cartItems: 0,
   searchDebounce: null,
   catalogPath: [], // breadcrumb: [{type, id, name}]
+  notifications: {
+    page: 1,
+    pageSize: 8,
+    hasMore: false,
+    selectedId: null,
+    items: [],
+    unreadCount: 0,
+  },
 };
 
 const ROLE_INHERITANCE = {
@@ -150,6 +158,7 @@ function navigate(screen, params = {}) {
     order: 'Заказ', earnings: 'Доходы', approvals: 'Согласования',
     analytics: 'Аналитика', profile: 'Профиль', item: 'Работа',
     notifications: 'Уведомления',
+    suggestions: 'Предложения',
     'profile-edit': 'Личные данные',
     qr: 'Оплата',
   };
@@ -190,6 +199,7 @@ async function loadScreen(screen, params) {
     case 'profile': loadProfile(); break;
     case 'item': await loadItem(params.id); break;
     case 'notifications': await loadNotifications(); break;
+    case 'suggestions': await loadSuggestionsComposer(); break;
     case 'profile-edit': await loadProfileEdit(); break;
     case 'qr': await loadQR(params.estimateId, params.profile); break;
   }
@@ -237,9 +247,9 @@ async function loadDashboard() {
   }
   if (data.unread_notifications) {
     stats.push({value: data.unread_notifications, label: 'Уведомлений'});
-    document.getElementById('notif-badge').textContent = data.unread_notifications;
-    document.getElementById('notif-badge').classList.remove('hidden');
   }
+  state.notifications.unreadCount = Number(data.unread_notifications || 0);
+  setNotificationBadge(state.notifications.unreadCount);
 
   document.getElementById('dash-stats').innerHTML = stats.map(s => `
     <div class="stat-card">
@@ -290,6 +300,10 @@ async function loadDashboard() {
     icon: '📝', color: 'blue', title: 'Заказы',
     desc: 'Отслеживание и история', action: "navigate('orders')",
     badge: data.active_orders || null,
+  });
+  actions.push({
+    icon: '💡', color: 'orange', title: 'Предложения',
+    desc: 'Идеи, боли и улучшения для разработчиков', action: "navigate('suggestions')",
   });
 
   document.getElementById('dash-actions').innerHTML = actions.map(a => `
@@ -589,6 +603,11 @@ function renderEstimate(est) {
         <button class="btn btn-ghost btn-sm" onclick="requestDiscount(${est.id})">💸 Скидка</button>
       </div>
       ` : ''}
+      <div class="cart-actions mt-8">
+        <button class="btn btn-danger btn-block" onclick="deleteEstimate(${est.id}, ${est.items.length}, ${est.final})">
+          ❌ Удалить смету
+        </button>
+      </div>
     `;
   } else if (est.status === 'client_review' && canClientRespond) {
     actionsHtml = `
@@ -693,6 +712,24 @@ async function removeItem(estimateId, lineItemId) {
   } catch (e) { toast(e.message, true); }
 }
 
+async function deleteEstimate(estimateId, itemCount, finalAmount) {
+  const confirmed = await confirmAction(
+    `Удалить смету #${estimateId}?\nПозиций: ${itemCount}\nИтого: ${money(finalAmount)}\n\nДействие необратимо.`
+  );
+  if (!confirmed) return;
+
+  try {
+    await api('DELETE', `/estimates/${estimateId}`);
+    if (state.activeEstimateId === estimateId) {
+      state.activeEstimateId = null;
+      state.cartItems = 0;
+      updateFAB();
+    }
+    toast('Смета удалена');
+    navigate('estimates');
+  } catch (e) { toast(e.message, true); }
+}
+
 async function sendToClient(estimateId) {
   // For now, just change status to client_review
   try {
@@ -719,17 +756,21 @@ async function rejectEstimate(estimateId) {
 }
 
 function requestDiscount(estimateId) {
-  const input = prompt('Скидка (формат: % 10 или ₽ 500)\nПричина через пробел:');
+  const input = prompt('Процент скидки\nВведите только число, например: 10 или 12.5');
   if (!input) return;
-  const parts = input.trim().split(/\s+/);
-  if (parts.length < 2) { toast('Неверный формат', true); return; }
-  const type = parts[0].includes('%') ? 'percent' : 'fixed';
-  const value = parseFloat(parts[1]);
-  const reason = parts.slice(2).join(' ') || 'Скидка по согласованию';
+  const value = parseFloat(input.trim().replace('%', '').replace(',', '.'));
+  if (!Number.isFinite(value)) {
+    toast('Укажите только процент скидки', true);
+    return;
+  }
+  if (value <= 0 || value > 50) {
+    toast('Скидка должна быть больше 0% и не превышать 50%', true);
+    return;
+  }
 
   api('POST', `/estimates/${estimateId}/discount`, {
-    discount_type: type, value, reason,
-  }).then(() => toast('Запрос на скидку отправлен'))
+    value,
+  }).then(() => toast(`Скидка обновлена до ${formatPercent(value)}`))
     .catch(e => toast(e.message, true));
 }
 
@@ -934,7 +975,7 @@ async function loadApprovals() {
       <div class="card-header">
         <div>
           <div class="card-title">Смета #${dr.estimate_id}</div>
-          <div class="card-subtitle">${dr.type === 'percent' ? dr.value + '%' : money(dr.value)} — ${dr.reason}</div>
+          <div class="card-subtitle">${dr.type === 'percent' ? dr.value + '%' : money(dr.value)}</div>
         </div>
       </div>
       <div style="display:flex;gap:8px">
@@ -951,6 +992,79 @@ async function processApproval(requestId, action) {
     toast(action === 'approve' ? '✅ Одобрено' : '❌ Отклонено');
     await loadApprovals();
   } catch (e) { toast(e.message, true); }
+}
+
+// ─── Suggestions ────────────────────────────────────────────
+async function loadSuggestionsComposer() {
+  const container = document.getElementById('suggestions-content');
+  container.innerHTML = `
+    <div class="card suggestion-card">
+      <div class="card-title">💡 Предложить улучшение</div>
+      <div class="card-subtitle">
+        Напишите одним сообщением идею, проблему или неудобство.
+        Текст сохранится и уйдёт разработчикам во внутренние уведомления.
+      </div>
+      <div class="form-group mt-12">
+        <label class="form-label" for="suggestion-message">Текст предложения</label>
+        <textarea
+          id="suggestion-message"
+          class="form-input suggestion-textarea"
+          placeholder="Например: в экране сметы не хватает быстрой кнопки дублирования, из-за этого мы теряем время на повторной сборке..."
+          oninput="updateSuggestionCounter()"
+        ></textarea>
+        <div class="suggestion-meta">
+          <span class="text-muted">Минимум 10 символов, можно писать в свободной форме.</span>
+          <span id="suggestion-counter" class="suggestion-counter">0/1500</span>
+        </div>
+      </div>
+      <div class="suggestion-hints">
+        <div class="suggestion-hint"><strong>Что не так?</strong> Где и какой именно сценарий неудобен.</div>
+        <div class="suggestion-hint"><strong>Что нужно?</strong> Какой результат был бы полезен.</div>
+        <div class="suggestion-hint"><strong>Что сломано?</strong> Если это баг, коротко опишите шаги и эффект.</div>
+      </div>
+      <button id="suggestion-submit" class="btn btn-primary btn-block mt-12" onclick="submitSuggestion()">
+        Отправить разработчикам
+      </button>
+    </div>
+  `;
+  updateSuggestionCounter();
+}
+
+function updateSuggestionCounter() {
+  const input = document.getElementById('suggestion-message');
+  const counter = document.getElementById('suggestion-counter');
+  if (!input || !counter) return;
+
+  const length = input.value.trim().length;
+  counter.textContent = `${length}/1500`;
+  counter.classList.toggle('text-accent', length >= 10 && length <= 1500);
+}
+
+async function submitSuggestion() {
+  const input = document.getElementById('suggestion-message');
+  const button = document.getElementById('suggestion-submit');
+  if (!input || !button) return;
+
+  const message = input.value.trim();
+  if (message.length < 10) {
+    toast('Опишите предложение чуть подробнее', true);
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    const payload = await api('POST', '/suggestions', {message});
+    input.value = '';
+    updateSuggestionCounter();
+    const deliveredText = payload.recipient_count
+      ? `Предложение #${payload.id} отправлено`
+      : `Предложение #${payload.id} сохранено`;
+    toast(deliveredText);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ─── Analytics ──────────────────────────────────────────────
@@ -1020,6 +1134,7 @@ function loadProfile() {
     menuItems += profileItem('📊', 'Мои сметы', "navigate('estimates')");
   }
   menuItems += profileItem('📝', 'Мои заказы', "navigate('orders')");
+  menuItems += profileItem('💡', 'Предложения', "navigate('suggestions')");
   if (isAdmin) {
     menuItems += profileItem('📈', 'Аналитика', "navigate('analytics')");
     menuItems += profileItem('✅', 'Согласования', "navigate('approvals')");
@@ -1241,59 +1356,225 @@ async function showNotifications() {
   navigate('notifications');
 }
 
-async function loadNotifications() {
-  const notifs = await api('GET', '/notifications');
-  const container = document.getElementById('notifications-list');
+async function loadNotificationsPage(page) {
+  state.notifications.page = Math.max(1, Number(page || 1));
+  state.notifications.selectedId = null;
+  await loadNotifications();
+}
 
-  if (notifs.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>Нет уведомлений</p></div>';
+async function loadNotifications() {
+  const container = document.getElementById('notifications-list');
+  const page = Math.max(1, Number(state.notifications.page || 1));
+  const offset = (page - 1) * state.notifications.pageSize;
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-title">Загружаем уведомления...</div>
+      <div class="card-subtitle">Подтягиваем текущую страницу и историю.</div>
+    </div>
+  `;
+
+  try {
+    const raw = await api('GET', `/notifications?limit=${state.notifications.pageSize + 1}&offset=${offset}`);
+    state.notifications.page = page;
+    state.notifications.hasMore = raw.length > state.notifications.pageSize;
+    state.notifications.items = raw.slice(0, state.notifications.pageSize);
+
+    if (!state.notifications.items.some(item => item.id === state.notifications.selectedId)) {
+      state.notifications.selectedId = null;
+    }
+
+    renderNotifications();
+  } catch (e) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-title">Не удалось загрузить уведомления</div>
+        <div class="card-subtitle">${escapeHtml(e.message || 'Попробуйте ещё раз')}</div>
+        <button class="btn btn-primary mt-12" onclick="loadNotifications()">
+          Обновить
+        </button>
+      </div>
+    `;
+    toast(e.message, true);
+  }
+}
+
+async function openNotification(notifId) {
+  const notification = state.notifications.items.find(item => item.id === notifId);
+  if (!notification) return;
+
+  state.notifications.selectedId = notifId;
+  if (notification.is_unread) {
+    try {
+      await api('POST', `/notifications/${notifId}/read`);
+      notification.is_unread = false;
+      notification.status = 'read';
+      state.notifications.unreadCount = Math.max(0, Number(state.notifications.unreadCount || 0) - 1);
+      setNotificationBadge(state.notifications.unreadCount);
+    } catch (e) {
+      console.warn('Failed to mark notification as read', e);
+    }
+  }
+
+  renderNotifications();
+}
+
+function closeNotificationDetail() {
+  state.notifications.selectedId = null;
+  renderNotifications();
+}
+
+function canOpenNotificationTarget(notification) {
+  if (!notification) return false;
+  if (notification.entity_type === 'estimate' && notification.entity_id) return true;
+  if (notification.entity_type === 'order' && notification.entity_id) return true;
+  if (notification.entity_type === 'discount_request' || notification.event_type === 'discount.requested') return true;
+  return false;
+}
+
+function openNotificationTarget() {
+  const notification = state.notifications.items.find(item => item.id === state.notifications.selectedId);
+  if (!notification) return;
+
+  if (notification.entity_type === 'estimate' && notification.entity_id) {
+    navigate('estimate', {id: notification.entity_id});
+  } else if (notification.entity_type === 'order' && notification.entity_id) {
+    navigate('order', {id: notification.entity_id});
+  } else if (notification.entity_type === 'discount_request' || notification.event_type === 'discount.requested') {
+    navigate('approvals');
+  } else {
+    toast('Для этого уведомления нет отдельного экрана', true);
+  }
+}
+
+function renderNotifications() {
+  const container = document.getElementById('notifications-list');
+  const notification = state.notifications.items.find(item => item.id === state.notifications.selectedId) || null;
+
+  if (notification) {
+    container.innerHTML = renderNotificationDetail(notification);
     return;
   }
 
-  const eventIcons = {
-    'discount.requested': '💸', 'discount.approved': '✅', 'discount.rejected': '❌',
-    'estimate.for_review': '📊', 'estimate.approved': '✅',
-    'order.assigned': '👷', 'order.completed': '✅',
-    'payment.received': '💰', 'invite.pending_approval': '📨',
-    'staffing.action': '👥',
-  };
+  const pageStart = ((state.notifications.page - 1) * state.notifications.pageSize) + 1;
+  const pageEnd = pageStart + Math.max(state.notifications.items.length - 1, 0);
+  const unreadCount = Number(state.notifications.unreadCount || 0);
 
-  container.innerHTML = notifs.map(n => {
-    const icon = eventIcons[n.event_type] || '🔔';
-    const isUnread = n.status === 'sent' || n.status === 'pending';
-    const timeStr = n.created_at
-      ? new Date(n.created_at).toLocaleString('ru-RU', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})
-      : '';
-
-    return `
-      <div class="notif-row ${isUnread ? 'unread' : ''}" onclick="openNotification(${n.id}, '${n.entity_type || ''}', ${n.entity_id || 'null'})">
-        <div class="notif-icon">${icon}</div>
-        <div class="notif-body">
-          <div class="notif-title">${n.title}</div>
-          <div class="notif-text">${n.body}</div>
-          <div class="notif-time">${timeStr}</div>
+  if (state.notifications.items.length === 0) {
+    container.innerHTML = `
+      <div class="card notif-summary-card">
+        <div class="notif-summary-top">
+          <div>
+            <div class="card-title">Журнал уведомлений</div>
+            <div class="card-subtitle">Здесь сохраняется вся история, ничего не пропадает.</div>
+          </div>
+          <div class="notif-summary-count">${unreadCount}</div>
         </div>
-        ${isUnread ? '<div class="notif-dot"></div>' : ''}
+      </div>
+      <div class="empty-state card">
+        <p>Уведомлений пока нет</p>
+        <p class="text-muted">Когда появятся события, они останутся в этом журнале.</p>
       </div>
     `;
-  }).join('');
+    return;
+  }
 
-  // Hide badge
-  document.getElementById('notif-badge').classList.add('hidden');
+  container.innerHTML = `
+    <div class="card notif-summary-card">
+      <div class="notif-summary-top">
+        <div>
+          <div class="card-title">Журнал уведомлений</div>
+          <div class="card-subtitle">
+            Записи ${pageStart}-${pageEnd}. Непрочитанных: ${unreadCount}.
+          </div>
+        </div>
+        <div class="notif-summary-count">${unreadCount}</div>
+      </div>
+      <div class="notif-page-hint">
+        Страница ${state.notifications.page}${state.notifications.hasMore ? ' • доступны более ранние уведомления' : ''}
+      </div>
+    </div>
+    <div class="notif-list">
+      ${state.notifications.items.map(n => `
+        <div class="notif-row ${n.is_unread ? 'unread' : ''}" onclick="openNotification(${n.id})">
+          <div class="notif-icon">${notificationIcon(n.event_type)}</div>
+          <div class="notif-body">
+            <div class="notif-title">${escapeHtml(n.title || 'Уведомление')}</div>
+            <div class="notif-text">${escapeHtml(n.body || '')}</div>
+            <div class="notif-time">${formatNotificationListTime(n.created_at)}</div>
+          </div>
+          ${n.is_unread ? '<div class="notif-dot"></div>' : ''}
+        </div>
+      `).join('')}
+    </div>
+    <div class="pager">
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page - 1})"
+        ${state.notifications.page === 1 ? 'disabled' : ''}
+      >
+        ← Новее
+      </button>
+      <div class="pager-label">Страница ${state.notifications.page}</div>
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page + 1})"
+        ${!state.notifications.hasMore ? 'disabled' : ''}
+      >
+        Старее →
+      </button>
+    </div>
+  `;
 }
 
-async function openNotification(notifId, entityType, entityId) {
-  // Mark as read
-  try { await api('POST', `/notifications/${notifId}/read`); } catch(e) { /* ignore */ }
+function renderNotificationDetail(notification) {
+  const canOpenTarget = canOpenNotificationTarget(notification);
+  const bodyHtml = escapeHtml(notification.body || '').replace(/\n/g, '<br>');
 
-  // Navigate to entity
-  if (entityType === 'estimate' && entityId) {
-    navigate('estimate', {id: entityId});
-  } else if (entityType === 'order' && entityId) {
-    navigate('order', {id: entityId});
-  } else if (entityType === 'discount_request' && entityId) {
-    navigate('approvals');
-  }
+  return `
+    <div class="card notif-detail-card">
+      <div class="notif-detail-meta">
+        <span class="notif-chip ${notification.is_unread ? 'unread' : 'read'}">
+          ${notification.is_unread ? 'Новое' : 'Просмотрено'}
+        </span>
+        <span class="notif-chip">${formatNotificationDetailTime(notification.created_at)}</span>
+        <span class="notif-chip">${escapeHtml(notification.event_type || 'event')}</span>
+      </div>
+      <div class="notif-detail-title">${escapeHtml(notification.title || 'Уведомление')}</div>
+      <div class="notif-detail-body">${bodyHtml || 'Без дополнительного текста'}</div>
+      ${canOpenTarget ? `
+      <div class="notif-target-box">
+        <div class="notif-target-label">Связанное действие</div>
+        <div class="notif-target-value">${escapeHtml(notification.target_label || 'Открыть связанную сущность')}</div>
+      </div>
+      ` : ''}
+      <div class="notif-detail-actions">
+        ${canOpenTarget ? `
+        <button class="btn btn-primary" onclick="openNotificationTarget()">
+          ${escapeHtml(notification.target_label || 'Открыть')}
+        </button>
+        ` : ''}
+        <button class="btn btn-secondary" onclick="closeNotificationDetail()">← К списку</button>
+      </div>
+    </div>
+    <div class="pager">
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page - 1})"
+        ${state.notifications.page === 1 ? 'disabled' : ''}
+      >
+        ← Новее
+      </button>
+      <div class="pager-label">Страница ${state.notifications.page}</div>
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page + 1})"
+        ${!state.notifications.hasMore ? 'disabled' : ''}
+      >
+        Старее →
+      </button>
+    </div>
+  `;
 }
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -1301,8 +1582,23 @@ function money(amount) {
   return new Intl.NumberFormat('ru-RU').format(amount || 0) + '₽';
 }
 
+function formatPercent(value) {
+  return new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0)) + '%';
+}
+
 function esc(str) {
   return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function complexityLabel(c) {
@@ -1340,6 +1636,63 @@ function updateFAB() {
   } else {
     fab.classList.add('hidden');
   }
+}
+
+function setNotificationBadge(count) {
+  const badge = document.getElementById('notif-badge');
+  const value = Math.max(0, Number(count || 0));
+  if (value > 0) {
+    badge.textContent = value > 99 ? '99+' : String(value);
+    badge.classList.remove('hidden');
+  } else {
+    badge.textContent = '0';
+    badge.classList.add('hidden');
+  }
+}
+
+function confirmAction(message) {
+  if (tg?.showConfirm) {
+    return new Promise(resolve => tg.showConfirm(message, resolve));
+  }
+  return Promise.resolve(window.confirm(message));
+}
+
+function notificationIcon(eventType) {
+  return {
+    'suggestion.created': '💡',
+    'discount.requested': '💸',
+    'discount.approved': '✅',
+    'discount.rejected': '❌',
+    'estimate.for_review': '📊',
+    'estimate.approved': '✅',
+    'estimate.deleted': '🗑',
+    'order.assigned': '👷',
+    'order.completed': '✅',
+    'payment.received': '💰',
+    'invite.pending_approval': '📨',
+    'staffing.action': '👥',
+  }[eventType] || '🔔';
+}
+
+function formatNotificationListTime(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatNotificationDetailTime(value) {
+  if (!value) return 'Дата неизвестна';
+  return new Date(value).toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // ─── Start ──────────────────────────────────────────────────

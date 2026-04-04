@@ -15,6 +15,8 @@
 
   --card-bg: var(--tg-theme-bg-color, #ffffff);
   --card-border: rgba(0,0,0,0.06);
+  --border: var(--card-border);
+  --line: var(--card-border);
   --card-shadow: 0 1px 3px rgba(0,0,0,0.06);
   --radius: 14px;
   --radius-sm: 10px;
@@ -40,6 +42,10 @@ body {
 }
 input, button, textarea { font: inherit; color: inherit; }
 button { background: none; border: none; cursor: pointer; }
+button:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
 
 /* ─── App Shell ─── */
 .app {
@@ -563,6 +569,43 @@ button { background: none; border: none; cursor: pointer; }
 .profile-item .chevron { color: var(--text-muted); }
 
 /* ─── Empty State ─── */
+.suggestion-card { margin-bottom: 0; }
+.suggestion-textarea {
+  min-height: 172px;
+  resize: vertical;
+  padding-top: 12px;
+  line-height: 1.5;
+}
+.suggestion-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.suggestion-counter {
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.suggestion-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.suggestion-hint {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+  font-size: 13px;
+  line-height: 1.45;
+}
+.suggestion-hint strong {
+  display: inline-block;
+  margin-right: 4px;
+}
 .empty-state {
   text-align: center;
   padding: 40px 20px;
@@ -736,6 +779,105 @@ button { background: none; border: none; cursor: pointer; }
 .notif-title { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
 .notif-text { font-size: 13px; color: var(--text-muted); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .notif-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.notif-list { display: flex; flex-direction: column; gap: 0; }
+.notif-summary-card { margin-bottom: 10px; }
+.notif-summary-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.notif-summary-count {
+  min-width: 42px;
+  height: 42px;
+  border-radius: 21px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.notif-page-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.notif-detail-card { margin-bottom: 10px; }
+.notif-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.notif-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.notif-chip.unread {
+  background: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+  color: var(--accent);
+}
+.notif-chip.read {
+  background: color-mix(in srgb, var(--text-muted) 12%, var(--card-bg));
+  color: var(--text-muted);
+}
+.notif-detail-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.notif-detail-body {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+  word-break: break-word;
+}
+.notif-target-box {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.notif-target-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.notif-target-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+.notif-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.notif-detail-actions .btn { flex: 1 1 160px; }
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pager .btn { flex: 1 1 0; }
+.pager-label {
+  min-width: 96px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
 /* ─── Form Fields ─── */
 .form-group { margin-bottom: 12px; }
 .form-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }

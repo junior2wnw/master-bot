@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -499,6 +499,25 @@ async def delete_estimate_item(
     return {"ok": True}
 
 
+@router.delete("/estimates/{estimate_id}")
+async def delete_estimate_api(
+    estimate_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.core.exceptions import NotFoundError, PermissionDenied
+    from app.services.estimate import delete_estimate
+
+    try:
+        await delete_estimate(session, estimate_id=estimate_id, user_id=user.id)
+    except NotFoundError as exc:
+        raise HTTPException(404, exc.message) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(403, exc.message) from exc
+
+    return {"ok": True}
+
+
 class EstimateStatusRequest(BaseModel):
     status: str
     client_telegram_id: int | None = None
@@ -548,9 +567,7 @@ async def update_estimate_status_api(
 
 
 class DiscountRequestBody(BaseModel):
-    discount_type: str  # percent | fixed
-    value: float
-    reason: str
+    value: float = Field(gt=0, le=50)
 
 
 @router.post("/estimates/{estimate_id}/discount")
@@ -569,9 +586,8 @@ async def request_discount(
         session,
         estimate_id=estimate_id,
         requested_by=user,
-        discount_type=body.discount_type,
+        discount_type="percent",
         discount_value=body.value,
-        reason=body.reason,
     )
 
     return {"id": dr.id, "status": dr.status}
@@ -777,8 +793,14 @@ async def list_notifications(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
     limit: int = Query(default=30, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
-    notifications = await list_notifications_for_user(session, user_id=user.id, limit=limit)
+    notifications = await list_notifications_for_user(
+        session,
+        user_id=user.id,
+        limit=limit,
+        offset=offset,
+    )
     return [serialize_notification(item) for item in notifications]
 
 
@@ -796,6 +818,31 @@ async def mark_notification_read(
     if not notification:
         raise HTTPException(404, "Notification not found")
     return {"ok": True}
+
+
+class ProjectSuggestionBody(BaseModel):
+    message: str = Field(min_length=10, max_length=1500)
+
+
+@router.post("/suggestions")
+async def create_project_suggestion_api(
+    body: ProjectSuggestionBody,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.services.suggestion import create_project_suggestion
+
+    suggestion, recipient_count = await create_project_suggestion(
+        session,
+        author=user,
+        message=body.message,
+        source="webapp",
+    )
+    return {
+        "id": suggestion.id,
+        "status": suggestion.status,
+        "recipient_count": recipient_count,
+    }
 
 
 # ─── Dashboard ───────────────────────────────────────────────
@@ -863,7 +910,6 @@ async def list_approvals(
             "estimate_id": dr.estimate_id,
             "type": dr.discount_type,
             "value": float(dr.discount_value),
-            "reason": dr.reason,
             "status": dr.status,
             "created_at": dr.created_at.isoformat() if dr.created_at else None,
         }
