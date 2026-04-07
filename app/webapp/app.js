@@ -183,37 +183,6 @@ function navigate(screen, params = {}) {
     state.history.push({screen: state.screen, params: {...(state.currentParams || {})}});
   }
   activateScreen(screen, params);
-  return;
-  state.screen = screen;
-
-  // Hide all screens, show target
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const el = document.getElementById('screen-' + screen);
-  if (el) el.classList.add('active');
-
-  // Update tabs
-  document.querySelectorAll('.tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === screen);
-  });
-
-  // Back button
-  document.getElementById('btn-back').classList.toggle('hidden', state.history.length === 0);
-
-  // Header title
-  const titles = {
-    dashboard: 'РњР°СЃС‚РµСЂР‘РѕС‚', search: 'РџРѕРёСЃРє', catalog: 'РљР°С‚Р°Р»РѕРі',
-    estimates: 'РЎРјРµС‚С‹', estimate: 'РЎРјРµС‚Р°', orders: 'Р—Р°РєР°Р·С‹',
-    order: 'Р—Р°РєР°Р·', earnings: 'Р”РѕС…РѕРґС‹', approvals: 'РЎРѕРіР»Р°СЃРѕРІР°РЅРёСЏ',
-    analytics: 'РђРЅР°Р»РёС‚РёРєР°', profile: 'РџСЂРѕС„РёР»СЊ', item: 'Р Р°Р±РѕС‚Р°',
-    notifications: 'РЈРІРµРґРѕРјР»РµРЅРёСЏ',
-    suggestions: 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ',
-    'profile-edit': 'Р›РёС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ',
-    qr: 'РћРїР»Р°С‚Р°',
-  };
-  document.getElementById('header-title').textContent = params.title || titles[screen] || '';
-
-  // Load screen data
-  loadScreen(screen, params);
 }
 
 function replaceScreen(screen, params = {}) {
@@ -300,8 +269,7 @@ async function loadDashboard() {
     stats.push({value: data.pending_approvals, label: 'РћР¶РёРґР°СЋС‚ РґРµР№СЃС‚РІРёСЏ'});
   }
   if (data.unread_notifications) {
-    stats.push({value: data.unread_notifications, label: 'РЈРІРµРґРѕРјР»РµРЅРёР№'});
-    state.notifications.unreadCount = Number(data.unread_notifications || 0);
+    stats.push({value: data.unread_notifications, label: 'Уведомлений'});
   }
   state.notifications.unreadCount = Number(data.unread_notifications || 0);
   setNotificationBadge(state.notifications.unreadCount);
@@ -357,8 +325,8 @@ async function loadDashboard() {
     badge: data.active_orders || null,
   });
   actions.push({
-    icon: 'рџ’Ў', color: 'orange', title: 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ',
-    desc: 'РРґРµРё, Р±РѕР»Рё Рё СѓР»СѓС‡С€РµРЅРёСЏ РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєРѕРІ', action: "navigate('suggestions')",
+    icon: '💡', color: 'orange', title: 'Предложения',
+    desc: 'Идеи, боли и улучшения для разработчиков', action: "navigate('suggestions')",
   });
 
   document.getElementById('dash-actions').innerHTML = actions.map(a => `
@@ -662,7 +630,7 @@ function renderEstimate(est) {
       ${canDelete ? `
       <div class="cart-actions mt-8">
         <button class="btn btn-danger btn-block" onclick="deleteEstimate(${est.id}, ${est.items.length}, ${est.final})">
-          \u{1F5D1} \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u043c\u0435\u0442\u0443
+          🗑 Удалить смету
         </button>
       </div>
       ` : ''}
@@ -772,7 +740,7 @@ async function removeItem(estimateId, lineItemId) {
 
 async function deleteEstimate(estimateId, itemCount, finalAmount) {
   const confirmed = await confirmAction(
-    `\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u043c\u0435\u0442\u0443 #${estimateId}?\n\u041f\u043e\u0437\u0438\u0446\u0438\u0439: ${itemCount}\n\u0418\u0442\u043e\u0433\u043e: ${money(finalAmount)}\n\n\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043d\u0435\u043e\u0431\u0440\u0430\u0442\u0438\u043c\u043e.`
+    `Удалить смету #${estimateId}?\nПозиций: ${itemCount}\nИтого: ${money(finalAmount)}\n\nДействие необратимо.`
   );
   if (!confirmed) return;
 
@@ -783,7 +751,7 @@ async function deleteEstimate(estimateId, itemCount, finalAmount) {
       state.cartItems = 0;
       updateFAB();
     }
-    toast('Р РЋР СР ВµРЎвЂљР В° РЎС“Р Т‘Р В°Р В»Р ВµР Р…Р В°');
+    toast('Смета удалена');
     replaceScreen('estimates');
   } catch (e) {
     toast(e.message, true);
@@ -1097,7 +1065,7 @@ async function loadApprovals() {
     <div class="card">
       <div class="card-header">
         <div>
-          <div class="card-title">РЎРјРµС‚Р° #${dr.estimate_id}</div>
+          <div class="card-title">Смета #${dr.estimate_id}</div>
           <div class="card-subtitle">${dr.type === 'fixed' ? `${money(dr.value)} (legacy)` : formatPercent(dr.value)}</div>
         </div>
       </div>
@@ -1117,36 +1085,36 @@ async function processApproval(requestId, action) {
   } catch (e) { toast(e.message, true); }
 }
 
-// в”Ђв”Ђв”Ђ Suggestions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ─── Suggestions ────────────────────────────────────────────
 async function loadSuggestionsComposer() {
   const container = document.getElementById('suggestions-content');
   container.innerHTML = `
     <div class="card suggestion-card">
-      <div class="card-title">рџ’Ў РџСЂРµРґР»РѕР¶РёС‚СЊ СѓР»СѓС‡С€РµРЅРёРµ</div>
+      <div class="card-title">💡 Предложить улучшение</div>
       <div class="card-subtitle">
-        РќР°РїРёС€РёС‚Рµ РѕРґРЅРёРј СЃРѕРѕР±С‰РµРЅРёРµРј РёРґРµСЋ, РїСЂРѕР±Р»РµРјСѓ РёР»Рё РЅРµСѓРґРѕР±СЃС‚РІРѕ.
-        РўРµРєСЃС‚ СЃРѕС…СЂР°РЅРёС‚СЃСЏ Рё СѓР№РґС‘С‚ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєР°Рј РІРѕ РІРЅСѓС‚СЂРµРЅРЅРёРµ СѓРІРµРґРѕРјР»РµРЅРёСЏ.
+        Напишите одним сообщением идею, проблему или неудобство.
+        Текст сохранится и уйдёт разработчикам во внутренние уведомления.
       </div>
       <div class="form-group mt-12">
-        <label class="form-label" for="suggestion-message">РўРµРєСЃС‚ РїСЂРµРґР»РѕР¶РµРЅРёСЏ</label>
+        <label class="form-label" for="suggestion-message">Текст предложения</label>
         <textarea
           id="suggestion-message"
           class="form-input suggestion-textarea"
-          placeholder="РќР°РїСЂРёРјРµСЂ: РІ СЌРєСЂР°РЅРµ СЃРјРµС‚С‹ РЅРµ С…РІР°С‚Р°РµС‚ Р±С‹СЃС‚СЂРѕР№ РєРЅРѕРїРєРё РґСѓР±Р»РёСЂРѕРІР°РЅРёСЏ, РёР·-Р·Р° СЌС‚РѕРіРѕ РјС‹ С‚РµСЂСЏРµРј РІСЂРµРјСЏ РЅР° РїРѕРІС‚РѕСЂРЅРѕР№ СЃР±РѕСЂРєРµ..."
+          placeholder="Например: в экране сметы не хватает быстрой кнопки дублирования, из-за этого мы теряем время на повторной сборке..."
           oninput="updateSuggestionCounter()"
         ></textarea>
         <div class="suggestion-meta">
-          <span class="text-muted">РњРёРЅРёРјСѓРј 10 СЃРёРјРІРѕР»РѕРІ, РјРѕР¶РЅРѕ РїРёСЃР°С‚СЊ РІ СЃРІРѕР±РѕРґРЅРѕР№ С„РѕСЂРјРµ.</span>
+          <span class="text-muted">Минимум 10 символов, можно писать в свободной форме.</span>
           <span id="suggestion-counter" class="suggestion-counter">0/1500</span>
         </div>
       </div>
       <div class="suggestion-hints">
-        <div class="suggestion-hint"><strong>Р§С‚Рѕ РЅРµ С‚Р°Рє?</strong> Р“РґРµ Рё РєР°РєРѕР№ РёРјРµРЅРЅРѕ С†РµРЅР°СЂРёР№ РЅРµСѓРґРѕР±РµРЅ.</div>
-        <div class="suggestion-hint"><strong>Р§С‚Рѕ РЅСѓР¶РЅРѕ?</strong> РљР°РєРѕР№ СЂРµР·СѓР»СЊС‚Р°С‚ Р±С‹Р» Р±С‹ РїРѕР»РµР·РµРЅ.</div>
-        <div class="suggestion-hint"><strong>Р§С‚Рѕ СЃР»РѕРјР°РЅРѕ?</strong> Р•СЃР»Рё СЌС‚Рѕ Р±Р°Рі, РєРѕСЂРѕС‚РєРѕ РѕРїРёС€РёС‚Рµ С€Р°РіРё Рё СЌС„С„РµРєС‚.</div>
+        <div class="suggestion-hint"><strong>Что не так?</strong> Где и какой именно сценарий неудобен.</div>
+        <div class="suggestion-hint"><strong>Что нужно?</strong> Какой результат был бы полезен.</div>
+        <div class="suggestion-hint"><strong>Что сломано?</strong> Если это баг, коротко опишите шаги и эффект.</div>
       </div>
       <button id="suggestion-submit" class="btn btn-primary btn-block mt-12" onclick="submitSuggestion()">
-        РћС‚РїСЂР°РІРёС‚СЊ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєР°Рј
+        Отправить разработчикам
       </button>
     </div>
   `;
@@ -1170,7 +1138,7 @@ async function submitSuggestion() {
 
   const message = input.value.trim();
   if (message.length < 10) {
-    toast('РћРїРёС€РёС‚Рµ РїСЂРµРґР»РѕР¶РµРЅРёРµ С‡СѓС‚СЊ РїРѕРґСЂРѕР±РЅРµРµ', true);
+    toast('Опишите предложение чуть подробнее', true);
     return;
   }
 
@@ -1180,8 +1148,8 @@ async function submitSuggestion() {
     input.value = '';
     updateSuggestionCounter();
     const deliveredText = payload.recipient_count
-      ? `РџСЂРµРґР»РѕР¶РµРЅРёРµ #${payload.id} РѕС‚РїСЂР°РІР»РµРЅРѕ`
-      : `РџСЂРµРґР»РѕР¶РµРЅРёРµ #${payload.id} СЃРѕС…СЂР°РЅРµРЅРѕ`;
+      ? `Предложение #${payload.id} отправлено`
+      : `Предложение #${payload.id} сохранено`;
     toast(deliveredText);
   } catch (e) {
     toast(e.message, true);
@@ -1190,7 +1158,7 @@ async function submitSuggestion() {
   }
 }
 
-// в”Ђв”Ђв”Ђ Analytics в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ─── Analytics ──────────────────────────────────────────────
 async function loadAnalytics() {
   try {
     const data = await api('GET', '/analytics/overview');
@@ -1256,8 +1224,8 @@ function loadProfile() {
     menuItems += profileItem('рџ’°', 'Р”РѕС…РѕРґС‹', "navigate('earnings')");
     menuItems += profileItem('рџ“Љ', 'РњРѕРё СЃРјРµС‚С‹', "navigate('estimates')");
   }
-  menuItems += profileItem('рџ“ќ', 'РњРѕРё Р·Р°РєР°Р·С‹', "navigate('orders')");
-  menuItems += profileItem('рџ’Ў', 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ', "navigate('suggestions')");
+  menuItems += profileItem('📝', 'Мои заказы', "navigate('orders')");
+  menuItems += profileItem('💡', 'Предложения', "navigate('suggestions')");
   if (isAdmin) {
     menuItems += profileItem('рџ“€', 'РђРЅР°Р»РёС‚РёРєР°', "navigate('analytics')");
     menuItems += profileItem('вњ…', 'РЎРѕРіР»Р°СЃРѕРІР°РЅРёСЏ', "navigate('approvals')");
@@ -1503,12 +1471,9 @@ async function showNotifications() {
   navigate('notifications', {page: state.notifications.page || 1, notificationId: null});
 }
 
-
-async function openNotification(notifId, entityType, entityId) {
+async function openNotification(notifId) {
   await openNotificationDetail(notifId);
-  return;
 }
-
 
 async function loadNotificationsPage(page) {
   const nextPage = Math.max(1, Number(page || 1));
@@ -1629,7 +1594,6 @@ function updateFAB() {
   }
 }
 
-// в”Ђв”Ђв”Ђ Start в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function setNotificationBadge(count) {
   const badge = document.getElementById('notif-badge');
   const value = Math.max(0, Number(count || 0));
@@ -1857,23 +1821,33 @@ function navigateToNotificationTarget(notification) {
 
 function notificationIcon(eventType) {
   return {
-    'suggestion.created': '\u{1F4A1}',
-    'discount.requested': '\u{1F4B8}',
-    'discount.approved': '\u2705',
-    'discount.rejected': '\u274C',
-    'estimate.for_review': '\u{1F4CA}',
-    'estimate.approved': '\u2705',
-    'estimate.deleted': '\u{1F5D1}',
-    'order.assigned': '\u{1F477}',
-    'order.completed': '\u2705',
-    'payment.received': '\u{1F4B0}',
-    'invite.pending_approval': '\u{1F4E8}',
-    'staffing.action': '\u{1F465}',
-  }[eventType] || '\u{1F514}';
+    'suggestion.created': '💡',
+    'discount.requested': '💸',
+    'discount.approved': '✅',
+    'discount.rejected': '❌',
+    'estimate.for_review': '📊',
+    'estimate.approved': '✅',
+    'estimate.deleted': '🗑',
+    'order.assigned': '👷',
+    'order.completed': '✅',
+    'payment.received': '💰',
+    'invite.pending_approval': '📨',
+    'staffing.action': '👥',
+  }[eventType] || '🔔';
+}
+
+function formatNotificationListTime(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function formatNotificationDetailTime(value) {
-  if (!value) return '\u0414\u0430\u0442\u0430 \u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u0430';
+  if (!value) return 'Дата неизвестна';
   return new Date(value).toLocaleString('ru-RU', {
     day: 'numeric',
     month: 'long',
@@ -1883,4 +1857,5 @@ function formatNotificationDetailTime(value) {
   });
 }
 
+// ─── Start ──────────────────────────────────────────────────
 init();

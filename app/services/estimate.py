@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
 from app.core.exceptions import NotFoundError, PermissionDenied
-from app.core.security import can_create_estimate, can_edit_estimate, can_respond_to_estimate, can_send_estimate_to_client
+from app.core.security import (
+    can_create_estimate,
+    can_edit_estimate,
+    can_respond_to_estimate,
+    can_send_estimate_to_client,
+)
 from app.models.estimate import (
     Estimate,
     EstimateDiscount,
@@ -269,18 +274,18 @@ async def delete_estimate(
         await session.execute(select(User).where(User.id == user_id))
     ).scalar_one_or_none()
     if not actor:
-        raise PermissionDenied("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ")
+        raise PermissionDenied("Пользователь не найден")
 
     estimate = (
         await session.execute(select(Estimate).where(Estimate.id == estimate_id))
     ).scalar_one_or_none()
     if not estimate:
-        raise NotFoundError("РЎРјРµС‚Р°")
+        raise NotFoundError("Смета")
 
     if not can_edit_estimate(actor, estimate):
-        raise PermissionDenied("РЈРґР°Р»СЏС‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ СЃРІРѕСЋ СЃРјРµС‚Сѓ-С‡РµСЂРЅРѕРІРёРє")
+        raise PermissionDenied("Удалять можно только свою смету-черновик")
     if estimate.order_id:
-        raise PermissionDenied("РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ СЃРјРµС‚Сѓ, РєРѕС‚РѕСЂР°СЏ СѓР¶Рµ РїСЂРёРІСЏР·Р°РЅР° Рє Р·Р°РєР°Р·Сѓ")
+        raise PermissionDenied("Нельзя удалить смету, которая уже привязана к заказу")
 
     versions = (
         await session.execute(

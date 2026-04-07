@@ -356,7 +356,6 @@ def estimate_actions(
             InlineKeyboardButton(text="📤 Клиенту", callback_data=f"est_send:{estimate_id}"),
             InlineKeyboardButton(text="🗑 Очистить", callback_data=f"est_clear:{estimate_id}"),
         )
-
         if caps["can_delete"]:
             kb.row(
                 InlineKeyboardButton(text="❌ Удалить смету", callback_data=f"est_delete_prompt:{estimate_id}")

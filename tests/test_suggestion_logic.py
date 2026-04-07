@@ -4,13 +4,13 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.exceptions import ValidationError
 from app.database import Base
 from app.models.hierarchy import Branch, BranchMember
 from app.models.notification import Notification
 from app.models.project_suggestion import ProjectSuggestion
 from app.models.user import User, UserRole
 from app.services import suggestion as suggestion_svc
-from app.core.exceptions import ValidationError
 
 
 async def _noop(*args, **kwargs):

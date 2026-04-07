@@ -416,28 +416,6 @@ def commission_report(data: dict) -> str:
 # DISCOUNTS
 # ═══════════════════════════════════════════════════════════════
 
-def _legacy_discount_request_info_unused(dr: dict) -> str:
-    type_label = "%" if dr["type"] == "percent" else "₽"
-    return (
-        f"{header('💸', 'Запрос на скидку')}\n"
-        f"{THIN_LINE}\n"
-        f"Смета: #{dr['estimate_id']}\n"
-        f"Мастер: {dr['master_name']}\n"
-        f"Скидка: <b>{dr['value']}{type_label}</b>\n"
-        f"Причина: {dr['reason']}\n"
-    )
-
-
-def _legacy_discount_request_prompt_unused() -> str:
-    return (
-        f"{header('💸', 'Запрос на скидку')}\n\n"
-        "Введите в формате:\n"
-        "<code>% 10 Постоянный клиент</code>\n"
-        "или\n"
-        "<code>₽ 500 Мелкие доработки</code>"
-    )
-
-
 # ═══════════════════════════════════════════════════════════════
 # ADMIN
 # ═══════════════════════════════════════════════════════════════

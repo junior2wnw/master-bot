@@ -34,7 +34,7 @@ def test_estimate_actions_include_delete_for_editable_draft():
     texts = _texts(markup)
     callbacks = _callbacks(markup)
 
-    assert "\u274c \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u043c\u0435\u0442\u0443" in texts
+    assert "❌ Удалить смету" in texts
     assert "est_delete_prompt:12" in callbacks
 
 
