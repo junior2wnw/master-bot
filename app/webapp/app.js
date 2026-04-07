@@ -1,20 +1,50 @@
-/* ═══════════════════════════════════════════════════════════
-   МастерБот Mini App — Core Application
+﻿/* в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
+   РњР°СЃС‚РµСЂР‘РѕС‚ Mini App вЂ” Core Application
    Telegram Web App SDK + Vanilla JS SPA
-   ═══════════════════════════════════════════════════════════ */
+   в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ */
 
 const API = '/api/v1';
 const tg = window.Telegram?.WebApp;
 
-// ─── State ──────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ State в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 const state = {
   user: null,
   screen: 'dashboard',
+  currentParams: {},
   history: [],
   activeEstimateId: null,
+  currentOrder: null,
+  orderCancelReasonPickerOpen: false,
   cartItems: 0,
   searchDebounce: null,
   catalogPath: [], // breadcrumb: [{type, id, name}]
+  notifications: {
+    page: 1,
+    pageSize: 8,
+    hasMore: false,
+    selectedId: null,
+    items: [],
+    unreadCount: 0,
+  },
+};
+
+const SCREEN_TITLES = {
+  dashboard: 'РњР°СЃС‚РµСЂР‘РѕС‚',
+  search: 'РџРѕРёСЃРє',
+  catalog: 'РљР°С‚Р°Р»РѕРі',
+  estimates: 'РЎРјРµС‚С‹',
+  estimate: 'РЎРјРµС‚Р°',
+  orders: 'Р—Р°РєР°Р·С‹',
+  order: 'Р—Р°РєР°Р·',
+  earnings: 'Р”РѕС…РѕРґС‹',
+  approvals: 'РЎРѕРіР»Р°СЃРѕРІР°РЅРёСЏ',
+  analytics: 'РђРЅР°Р»РёС‚РёРєР°',
+  profile: 'РџСЂРѕС„РёР»СЊ',
+  item: 'Р Р°Р±РѕС‚Р°',
+  notifications: 'РЈРІРµРґРѕРјР»РµРЅРёСЏ',
+  suggestions: 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ',
+  'profile-edit': 'Р›РёС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ',
+  qr: 'РћРїР»Р°С‚Р°',
 };
 
 const ROLE_INHERITANCE = {
@@ -53,7 +83,31 @@ function highestRole(roles = []) {
   return null;
 }
 
-// ─── Init ───────────────────────────────────────────────────
+function syncShell(screen) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + screen);
+  if (el) el.classList.add('active');
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === screen);
+  });
+
+  document.getElementById('btn-back').classList.toggle('hidden', state.history.length === 0);
+}
+
+function syncHeader(screen, params = {}) {
+  document.getElementById('header-title').textContent = params.title || SCREEN_TITLES[screen] || '';
+}
+
+function activateScreen(screen, params = {}) {
+  state.screen = screen;
+  state.currentParams = {...params};
+  syncShell(screen);
+  syncHeader(screen, params);
+  loadScreen(screen, params);
+}
+
+// в”Ђв”Ђв”Ђ Init в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function init() {
   if (tg) {
     tg.ready();
@@ -70,7 +124,7 @@ async function init() {
     await loadDashboard();
   } catch (e) {
     console.error('Auth failed:', e);
-    document.getElementById('loader').innerHTML = '<p style="color:var(--destructive);padding:20px">Ошибка авторизации</p>';
+    document.getElementById('loader').innerHTML = '<p style="color:var(--destructive);padding:20px">РћС€РёР±РєР° Р°РІС‚РѕСЂРёР·Р°С†РёРё</p>';
     return;
   }
 
@@ -82,7 +136,7 @@ function hideLoader() {
   document.getElementById('loader').classList.add('hidden');
 }
 
-// ─── API ────────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ API в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function api(method, path, body) {
   const url = new URL(API + path, window.location.origin);
   if (state.user && method === 'GET') {
@@ -123,11 +177,13 @@ function applyRoleContext(context = {}) {
   };
 }
 
-// ─── Navigation ─────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Navigation в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function navigate(screen, params = {}) {
   if (state.screen !== screen) {
-    state.history.push({screen: state.screen, params: {}});
+    state.history.push({screen: state.screen, params: {...(state.currentParams || {})}});
   }
+  activateScreen(screen, params);
+  return;
   state.screen = screen;
 
   // Hide all screens, show target
@@ -145,13 +201,14 @@ function navigate(screen, params = {}) {
 
   // Header title
   const titles = {
-    dashboard: 'МастерБот', search: 'Поиск', catalog: 'Каталог',
-    estimates: 'Сметы', estimate: 'Смета', orders: 'Заказы',
-    order: 'Заказ', earnings: 'Доходы', approvals: 'Согласования',
-    analytics: 'Аналитика', profile: 'Профиль', item: 'Работа',
-    notifications: 'Уведомления',
-    'profile-edit': 'Личные данные',
-    qr: 'Оплата',
+    dashboard: 'РњР°СЃС‚РµСЂР‘РѕС‚', search: 'РџРѕРёСЃРє', catalog: 'РљР°С‚Р°Р»РѕРі',
+    estimates: 'РЎРјРµС‚С‹', estimate: 'РЎРјРµС‚Р°', orders: 'Р—Р°РєР°Р·С‹',
+    order: 'Р—Р°РєР°Р·', earnings: 'Р”РѕС…РѕРґС‹', approvals: 'РЎРѕРіР»Р°СЃРѕРІР°РЅРёСЏ',
+    analytics: 'РђРЅР°Р»РёС‚РёРєР°', profile: 'РџСЂРѕС„РёР»СЊ', item: 'Р Р°Р±РѕС‚Р°',
+    notifications: 'РЈРІРµРґРѕРјР»РµРЅРёСЏ',
+    suggestions: 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ',
+    'profile-edit': 'Р›РёС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ',
+    qr: 'РћРїР»Р°С‚Р°',
   };
   document.getElementById('header-title').textContent = params.title || titles[screen] || '';
 
@@ -159,9 +216,15 @@ function navigate(screen, params = {}) {
   loadScreen(screen, params);
 }
 
+function replaceScreen(screen, params = {}) {
+  activateScreen(screen, params);
+}
+
 function goBack() {
   if (state.history.length > 0) {
     const prev = state.history.pop();
+    activateScreen(prev.screen, prev.params || {});
+    return;
     state.screen = prev.screen;
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     const el = document.getElementById('screen-' + prev.screen);
@@ -170,7 +233,7 @@ function goBack() {
       t.classList.toggle('active', t.dataset.tab === prev.screen);
     });
     document.getElementById('btn-back').classList.toggle('hidden', state.history.length === 0);
-    const titles = {dashboard:'МастерБот',search:'Поиск',catalog:'Каталог',estimates:'Сметы',profile:'Профиль'};
+    const titles = {dashboard:'РњР°СЃС‚РµСЂР‘РѕС‚',search:'РџРѕРёСЃРє',catalog:'РљР°С‚Р°Р»РѕРі',estimates:'РЎРјРµС‚С‹',profile:'РџСЂРѕС„РёР»СЊ'};
     document.getElementById('header-title').textContent = titles[prev.screen] || '';
   }
 }
@@ -189,13 +252,14 @@ async function loadScreen(screen, params) {
     case 'analytics': await loadAnalytics(); break;
     case 'profile': loadProfile(); break;
     case 'item': await loadItem(params.id); break;
-    case 'notifications': await loadNotifications(); break;
+    case 'notifications': await loadNotifications(params); break;
+    case 'suggestions': await loadSuggestionsComposer(); break;
     case 'profile-edit': await loadProfileEdit(); break;
     case 'qr': await loadQR(params.estimateId, params.profile); break;
   }
 }
 
-// ─── Setup UI ───────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Setup UI в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function setupUI() {
   const roles = state.user.roles;
   const isMaster = hasRole(roles, 'master');
@@ -206,7 +270,7 @@ function setupUI() {
   }
 }
 
-// ─── Dashboard ──────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Dashboard в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadDashboard() {
   const data = await api('GET', '/dashboard');
   applyRoleContext(data);
@@ -216,11 +280,11 @@ async function loadDashboard() {
   const isAdmin = hasRole(roles, 'admin');
   const isSenior = hasRole(roles, 'senior_master');
 
-  document.getElementById('dash-name').textContent = `Привет, ${state.user.name}!`;
+  document.getElementById('dash-name').textContent = `РџСЂРёРІРµС‚, ${state.user.name}!`;
 
   const roleLabels = {
-    product_owner: 'Product Owner', admin: 'Администратор',
-    senior_master: 'Старший мастер', master: 'Мастер', client: 'Клиент',
+    product_owner: 'Product Owner', admin: 'РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ',
+    senior_master: 'РЎС‚Р°СЂС€РёР№ РјР°СЃС‚РµСЂ', master: 'РњР°СЃС‚РµСЂ', client: 'РљР»РёРµРЅС‚',
   };
   document.getElementById('dash-subtitle').textContent =
     data.active_role_label || state.user.active_role_label || roleLabels[primaryRole] || primaryRole || '';
@@ -228,18 +292,19 @@ async function loadDashboard() {
   // Stats
   const stats = [];
   if (isMaster) {
-    stats.push({value: data.active_estimates || 0, label: 'Активных смет'});
-    stats.push({value: money(data.total_earned || 0), label: 'Заработано'});
+    stats.push({value: data.active_estimates || 0, label: 'РђРєС‚РёРІРЅС‹С… СЃРјРµС‚'});
+    stats.push({value: money(data.total_earned || 0), label: 'Р—Р°СЂР°Р±РѕС‚Р°РЅРѕ'});
   }
-  stats.push({value: data.active_orders || 0, label: 'Активных заказов'});
+  stats.push({value: data.active_orders || 0, label: 'РђРєС‚РёРІРЅС‹С… Р·Р°РєР°Р·РѕРІ'});
   if (data.pending_approvals) {
-    stats.push({value: data.pending_approvals, label: 'Ожидают действия'});
+    stats.push({value: data.pending_approvals, label: 'РћР¶РёРґР°СЋС‚ РґРµР№СЃС‚РІРёСЏ'});
   }
   if (data.unread_notifications) {
-    stats.push({value: data.unread_notifications, label: 'Уведомлений'});
-    document.getElementById('notif-badge').textContent = data.unread_notifications;
-    document.getElementById('notif-badge').classList.remove('hidden');
+    stats.push({value: data.unread_notifications, label: 'РЈРІРµРґРѕРјР»РµРЅРёР№'});
+    state.notifications.unreadCount = Number(data.unread_notifications || 0);
   }
+  state.notifications.unreadCount = Number(data.unread_notifications || 0);
+  setNotificationBadge(state.notifications.unreadCount);
 
   document.getElementById('dash-stats').innerHTML = stats.map(s => `
     <div class="stat-card">
@@ -251,45 +316,49 @@ async function loadDashboard() {
   // Actions
   const actions = [];
   actions.push({
-    icon: '🔍', color: 'blue', title: 'Быстрый поиск',
-    desc: 'Найти работу за секунды', action: "navigate('search')",
+    icon: 'рџ”Ќ', color: 'blue', title: 'Р‘С‹СЃС‚СЂС‹Р№ РїРѕРёСЃРє',
+    desc: 'РќР°Р№С‚Рё СЂР°Р±РѕС‚Сѓ Р·Р° СЃРµРєСѓРЅРґС‹', action: "navigate('search')",
   });
   actions.push({
-    icon: '📋', color: 'green', title: 'Каталог работ',
-    desc: 'Все услуги по категориям', action: "navigate('catalog')",
+    icon: 'рџ“‹', color: 'green', title: 'РљР°С‚Р°Р»РѕРі СЂР°Р±РѕС‚',
+    desc: 'Р’СЃРµ СѓСЃР»СѓРіРё РїРѕ РєР°С‚РµРіРѕСЂРёСЏРј', action: "navigate('catalog')",
   });
 
   if (isMaster) {
     actions.push({
-      icon: '📊', color: 'orange', title: 'Мои сметы',
-      desc: 'Создать или просмотреть', action: "navigate('estimates')",
+      icon: 'рџ“Љ', color: 'orange', title: 'РњРѕРё СЃРјРµС‚С‹',
+      desc: 'РЎРѕР·РґР°С‚СЊ РёР»Рё РїСЂРѕСЃРјРѕС‚СЂРµС‚СЊ', action: "navigate('estimates')",
       badge: data.active_estimates || null,
     });
     actions.push({
-      icon: '💰', color: 'purple', title: 'Доходы',
-      desc: 'Статистика и выплаты', action: "navigate('earnings')",
+      icon: 'рџ’°', color: 'purple', title: 'Р”РѕС…РѕРґС‹',
+      desc: 'РЎС‚Р°С‚РёСЃС‚РёРєР° Рё РІС‹РїР»Р°С‚С‹', action: "navigate('earnings')",
     });
   }
 
   if (isSenior || isAdmin) {
     actions.push({
-      icon: '✅', color: 'green', title: 'Согласования',
-      desc: 'Скидки и запросы', action: "navigate('approvals')",
+      icon: 'вњ…', color: 'green', title: 'РЎРѕРіР»Р°СЃРѕРІР°РЅРёСЏ',
+      desc: 'РЎРєРёРґРєРё Рё Р·Р°РїСЂРѕСЃС‹', action: "navigate('approvals')",
       badge: data.pending_approvals || null,
     });
   }
 
   if (isAdmin) {
     actions.push({
-      icon: '📈', color: 'red', title: 'Аналитика',
-      desc: 'Мониторинг платформы', action: "navigate('analytics')",
+      icon: 'рџ“€', color: 'red', title: 'РђРЅР°Р»РёС‚РёРєР°',
+      desc: 'РњРѕРЅРёС‚РѕСЂРёРЅРі РїР»Р°С‚С„РѕСЂРјС‹', action: "navigate('analytics')",
     });
   }
 
   actions.push({
-    icon: '📝', color: 'blue', title: 'Заказы',
-    desc: 'Отслеживание и история', action: "navigate('orders')",
+    icon: 'рџ“ќ', color: 'blue', title: 'Р—Р°РєР°Р·С‹',
+    desc: 'РћС‚СЃР»РµР¶РёРІР°РЅРёРµ Рё РёСЃС‚РѕСЂРёСЏ', action: "navigate('orders')",
     badge: data.active_orders || null,
+  });
+  actions.push({
+    icon: 'рџ’Ў', color: 'orange', title: 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ',
+    desc: 'РРґРµРё, Р±РѕР»Рё Рё СѓР»СѓС‡С€РµРЅРёСЏ РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєРѕРІ', action: "navigate('suggestions')",
   });
 
   document.getElementById('dash-actions').innerHTML = actions.map(a => `
@@ -304,7 +373,7 @@ async function loadDashboard() {
   `).join('');
 }
 
-// ─── Search ─────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Search в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function setupSearch() {
   const input = document.getElementById('search-input');
   input.addEventListener('input', () => {
@@ -370,7 +439,7 @@ function clearSearch() {
   document.getElementById('search-clear').classList.add('hidden');
 }
 
-// ─── Catalog ────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Catalog в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadCatalog(params = {}) {
   const container = document.getElementById('catalog-content');
 
@@ -378,7 +447,7 @@ async function loadCatalog(params = {}) {
     // Show items in subgroup
     const items = await api('GET', `/catalog/items?subgroup_id=${params.subgroupId}`);
     container.innerHTML = `
-      <p class="section-title">${params.title || 'Работы'}</p>
+      <p class="section-title">${params.title || 'Р Р°Р±РѕС‚С‹'}</p>
       <div class="item-list">${items.map(it => itemRow(it)).join('')}</div>
     `;
   } else if (params.groupId) {
@@ -386,16 +455,16 @@ async function loadCatalog(params = {}) {
     const subs = await api('GET', `/catalog/subgroups/${params.groupId}`);
     if (subs.length > 0) {
       container.innerHTML = `
-        <p class="section-title">${params.title || 'Подкатегории'}</p>
+        <p class="section-title">${params.title || 'РџРѕРґРєР°С‚РµРіРѕСЂРёРё'}</p>
         <div class="catalog-grid">
           ${subs.map(s => `
             <div class="catalog-card" onclick="navigate('catalog', {groupId: ${params.groupId}, subgroupId: ${s.id}, title: '${esc(s.name)}'})">
               <div class="label">${s.name}</div>
-              <div class="count">${s.count} работ</div>
+              <div class="count">${s.count} СЂР°Р±РѕС‚</div>
             </div>
           `).join('')}
         </div>
-        <p class="section-title mt-12">Все работы</p>
+        <p class="section-title mt-12">Р’СЃРµ СЂР°Р±РѕС‚С‹</p>
         <div class="item-list" id="group-items-${params.groupId}"></div>
       `;
       // Also load items
@@ -404,7 +473,7 @@ async function loadCatalog(params = {}) {
     } else {
       const items = await api('GET', `/catalog/items?group_id=${params.groupId}`);
       container.innerHTML = `
-        <p class="section-title">${params.title || 'Работы'}</p>
+        <p class="section-title">${params.title || 'Р Р°Р±РѕС‚С‹'}</p>
         <div class="item-list">${items.map(it => itemRow(it)).join('')}</div>
       `;
     }
@@ -412,12 +481,12 @@ async function loadCatalog(params = {}) {
     // Show groups
     const groups = await api('GET', `/catalog/groups/${params.professionId}`);
     container.innerHTML = `
-      <p class="section-title">${params.title || 'Категории'}</p>
+      <p class="section-title">${params.title || 'РљР°С‚РµРіРѕСЂРёРё'}</p>
       <div class="catalog-grid">
         ${groups.map(g => `
           <div class="catalog-card" onclick="navigate('catalog', {professionId: ${params.professionId}, groupId: ${g.id}, title: '${esc(g.name)}'})">
             <div class="label">${g.name}</div>
-            <div class="count">${g.count} работ</div>
+            <div class="count">${g.count} СЂР°Р±РѕС‚</div>
           </div>
         `).join('')}
       </div>
@@ -431,12 +500,12 @@ async function loadCatalog(params = {}) {
           <div class="catalog-card" onclick="navigate('catalog', {professionId: ${p.id}, title: '${esc(p.name)}'})">
             <div class="icon">${p.icon}</div>
             <div class="label">${p.name}</div>
-            <div class="count">${p.count} работ</div>
+            <div class="count">${p.count} СЂР°Р±РѕС‚</div>
           </div>
         `).join('')}
       </div>
       <div class="mt-12">
-        <p class="section-title">Популярные работы</p>
+        <p class="section-title">РџРѕРїСѓР»СЏСЂРЅС‹Рµ СЂР°Р±РѕС‚С‹</p>
         <div class="item-list" id="popular-items"></div>
       </div>
     `;
@@ -446,7 +515,7 @@ async function loadCatalog(params = {}) {
   }
 }
 
-// ─── Item Detail ────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Item Detail в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadItem(itemId) {
   const item = await api('GET', `/catalog/items/${itemId}`);
   const container = document.getElementById('item-detail');
@@ -455,37 +524,37 @@ async function loadItem(itemId) {
     <div class="card">
       <h3 style="font-size:17px;font-weight:700;margin-bottom:8px">${item.name}</h3>
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
-        <code>${item.code}</code> · ${item.unit}
-        ${item.complexity ? ` · ${complexityLabel(item.complexity)}` : ''}
+        <code>${item.code}</code> В· ${item.unit}
+        ${item.complexity ? ` В· ${complexityLabel(item.complexity)}` : ''}
       </div>
 
       <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">
         <div class="stat-card">
           <div class="stat-value" style="font-size:16px">${money(item.price_min)}</div>
-          <div class="stat-label">Минимум</div>
+          <div class="stat-label">РњРёРЅРёРјСѓРј</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" style="font-size:16px">${money(item.price)}</div>
-          <div class="stat-label">Рекоменд.</div>
+          <div class="stat-label">Р РµРєРѕРјРµРЅРґ.</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" style="font-size:16px">${money(item.price_max)}</div>
-          <div class="stat-label">Максимум</div>
+          <div class="stat-label">РњР°РєСЃРёРјСѓРј</div>
         </div>
       </div>
 
       ${item.description ? `<p style="font-size:14px;margin-bottom:8px">${item.description}</p>` : ''}
-      ${item.note ? `<p style="font-size:13px;color:var(--text-muted)">📝 ${item.note}</p>` : ''}
-      ${item.aliases ? `<p style="font-size:12px;color:var(--text-muted);margin-top:8px">🔍 ${item.aliases}</p>` : ''}
+      ${item.note ? `<p style="font-size:13px;color:var(--text-muted)">рџ“ќ ${item.note}</p>` : ''}
+      ${item.aliases ? `<p style="font-size:12px;color:var(--text-muted);margin-top:8px">рџ”Ќ ${item.aliases}</p>` : ''}
     </div>
 
     <button class="btn btn-primary btn-block" onclick="addToEstimate(${item.id}, '${esc(item.name)}')">
-      ➕ Добавить в смету
+      вћ• Р”РѕР±Р°РІРёС‚СЊ РІ СЃРјРµС‚Сѓ
     </button>
   `;
 }
 
-// ─── Estimates ──────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Estimates в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadEstimates() {
   const estimates = await api('GET', '/estimates');
   const container = document.getElementById('estimates-list');
@@ -493,23 +562,23 @@ async function loadEstimates() {
   if (estimates.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <p>У вас пока нет смет</p>
-        <button class="btn btn-primary mt-12" onclick="createEstimate()">➕ Создать смету</button>
+        <p>РЈ РІР°СЃ РїРѕРєР° РЅРµС‚ СЃРјРµС‚</p>
+        <button class="btn btn-primary mt-12" onclick="createEstimate()">вћ• РЎРѕР·РґР°С‚СЊ СЃРјРµС‚Сѓ</button>
       </div>
     `;
     return;
   }
 
-  const statusIcons = {draft:'📝', approved:'✅', client_review:'👁', paid:'💰', completed:'☑️', cancelled:'❌'};
-  const statusLabels = {draft:'Черновик', approved:'Согласована', client_review:'На проверке', paid:'Оплачена', completed:'Завершена', cancelled:'Отменена', master_proposed:'Предложена', in_progress:'В работе'};
+  const statusIcons = {draft:'рџ“ќ', approved:'вњ…', client_review:'рџ‘Ѓ', paid:'рџ’°', completed:'в‘пёЏ', cancelled:'вќЊ'};
+  const statusLabels = {draft:'Р§РµСЂРЅРѕРІРёРє', approved:'РЎРѕРіР»Р°СЃРѕРІР°РЅР°', client_review:'РќР° РїСЂРѕРІРµСЂРєРµ', paid:'РћРїР»Р°С‡РµРЅР°', completed:'Р—Р°РІРµСЂС€РµРЅР°', cancelled:'РћС‚РјРµРЅРµРЅР°', master_proposed:'РџСЂРµРґР»РѕР¶РµРЅР°', in_progress:'Р’ СЂР°Р±РѕС‚Рµ'};
 
   container.innerHTML = `
-    <button class="btn btn-primary btn-block mb-12" onclick="createEstimate()">➕ Новая смета</button>
+    <button class="btn btn-primary btn-block mb-12" onclick="createEstimate()">вћ• РќРѕРІР°СЏ СЃРјРµС‚Р°</button>
     ${estimates.map(e => `
       <div class="estimate-row" onclick="navigate('estimate', {id: ${e.id}})">
-        <div class="est-icon">${statusIcons[e.status] || '📋'}</div>
+        <div class="est-icon">${statusIcons[e.status] || 'рџ“‹'}</div>
         <div class="est-info">
-          <div class="est-title">Смета #${e.id} <span style="font-weight:400;color:var(--text-muted)">v${e.version}</span></div>
+          <div class="est-title">РЎРјРµС‚Р° #${e.id} <span style="font-weight:400;color:var(--text-muted)">v${e.version}</span></div>
           <div class="est-meta">${statusLabels[e.status] || e.status}</div>
         </div>
         <div class="est-amount">${money(e.final)}</div>
@@ -527,10 +596,11 @@ async function loadEstimate(estimateId) {
 
 function renderEstimate(est) {
   const container = document.getElementById('estimate-detail');
-  const statusLabels = {draft:'Черновик', approved:'Согласована', client_review:'На проверке', paid:'Оплачена', completed:'Завершена', master_proposed:'Предложена', in_progress:'В работе'};
+  const statusLabels = {draft:'Р§РµСЂРЅРѕРІРёРє', approved:'РЎРѕРіР»Р°СЃРѕРІР°РЅР°', client_review:'РќР° РїСЂРѕРІРµСЂРєРµ', paid:'РћРїР»Р°С‡РµРЅР°', completed:'Р—Р°РІРµСЂС€РµРЅР°', master_proposed:'РџСЂРµРґР»РѕР¶РµРЅР°', in_progress:'Р’ СЂР°Р±РѕС‚Рµ'};
   const caps = est.capabilities || {};
   const isDraft = est.status === 'draft';
   const canEdit = Boolean(caps.can_edit);
+  const canDelete = Boolean(caps.can_delete) && isDraft;
   const canSendToClient = Boolean(caps.can_send_to_client);
   const canRequestDiscount = Boolean(caps.can_request_discount);
   const canClientRespond = Boolean(caps.can_client_respond);
@@ -541,12 +611,12 @@ function renderEstimate(est) {
   if (est.items.length === 0) {
     itemsHtml = `
       <div class="empty-state">
-        <p>Смета пуста</p>
-        <p class="text-muted">${canEdit ? 'Добавьте работы через поиск или каталог' : 'В смете пока нет позиций'}</p>
+        <p>РЎРјРµС‚Р° РїСѓСЃС‚Р°</p>
+        <p class="text-muted">${canEdit ? 'Р”РѕР±Р°РІСЊС‚Рµ СЂР°Р±РѕС‚С‹ С‡РµСЂРµР· РїРѕРёСЃРє РёР»Рё РєР°С‚Р°Р»РѕРі' : 'Р’ СЃРјРµС‚Рµ РїРѕРєР° РЅРµС‚ РїРѕР·РёС†РёР№'}</p>
         ${canEdit ? `
         <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
-          <button class="btn btn-primary btn-sm" onclick="navigate('search')">🔍 Поиск</button>
-          <button class="btn btn-secondary btn-sm" onclick="navigate('catalog')">📋 Каталог</button>
+          <button class="btn btn-primary btn-sm" onclick="navigate('search')">рџ”Ќ РџРѕРёСЃРє</button>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('catalog')">рџ“‹ РљР°С‚Р°Р»РѕРі</button>
         </div>
         ` : ''}
       </div>
@@ -556,12 +626,12 @@ function renderEstimate(est) {
       <div class="cart-item">
         <div class="cart-item-info">
           <div class="cart-item-name">${i+1}. ${it.name}</div>
-          <div class="cart-item-meta">${it.unit} × ${money(it.unit_price)}${it.coefficients ? ' ' + Object.values(it.coefficients).map(v => '×'+v).join(' ') : ''}</div>
+          <div class="cart-item-meta">${it.unit} Г— ${money(it.unit_price)}${it.coefficients ? ' ' + Object.values(it.coefficients).map(v => 'Г—'+v).join(' ') : ''}</div>
           <div class="cart-item-price">${money(it.subtotal)}</div>
         </div>
         ${isDraft && canEdit ? `
         <div class="cart-item-controls">
-          <button class="qty-btn" onclick="changeQty(${est.id}, ${it.id}, ${it.quantity - 1})">−</button>
+          <button class="qty-btn" onclick="changeQty(${est.id}, ${it.id}, ${it.quantity - 1})">в€’</button>
           <span class="qty-value">${it.quantity}</span>
           <button class="qty-btn" onclick="changeQty(${est.id}, ${it.id}, ${it.quantity + 1})">+</button>
           <button class="cart-item-delete" onclick="removeItem(${est.id}, ${it.id})">
@@ -581,26 +651,33 @@ function renderEstimate(est) {
   if (isDraft && canEdit) {
     actionsHtml = `
       <div class="cart-actions">
-        <button class="btn btn-primary" onclick="navigate('search')">➕ Добавить</button>
-        ${canSendToClient ? `<button class="btn btn-secondary" onclick="sendToClient(${est.id})">📤 Клиенту</button>` : ''}
+        <button class="btn btn-primary" onclick="navigate('search')">вћ• Р”РѕР±Р°РІРёС‚СЊ</button>
+        ${canSendToClient ? `<button class="btn btn-secondary" onclick="sendToClient(${est.id})">рџ“¤ РљР»РёРµРЅС‚Сѓ</button>` : ''}
       </div>
       ${canRequestDiscount ? `
       <div class="cart-actions mt-8">
-        <button class="btn btn-ghost btn-sm" onclick="requestDiscount(${est.id})">💸 Скидка</button>
+        <button class="btn btn-ghost btn-sm" onclick="requestDiscount(${est.id})">рџ’ё РЎРєРёРґРєР°</button>
+      </div>
+      ` : ''}
+      ${canDelete ? `
+      <div class="cart-actions mt-8">
+        <button class="btn btn-danger btn-block" onclick="deleteEstimate(${est.id}, ${est.items.length}, ${est.final})">
+          \u{1F5D1} \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u043c\u0435\u0442\u0443
+        </button>
       </div>
       ` : ''}
     `;
   } else if (est.status === 'client_review' && canClientRespond) {
     actionsHtml = `
       <div class="cart-actions">
-        <button class="btn btn-primary" onclick="approveEstimate(${est.id})">✅ Согласовать</button>
-        <button class="btn btn-danger" onclick="rejectEstimate(${est.id})">❌ Отклонить</button>
+        <button class="btn btn-primary" onclick="approveEstimate(${est.id})">вњ… РЎРѕРіР»Р°СЃРѕРІР°С‚СЊ</button>
+        <button class="btn btn-danger" onclick="rejectEstimate(${est.id})">вќЊ РћС‚РєР»РѕРЅРёС‚СЊ</button>
       </div>
     `;
   } else if (est.status === 'approved' && canCreateOrder) {
     actionsHtml = `
       <div class="cart-actions">
-        <button class="btn btn-primary btn-block" onclick="createOrderFromEstimate(${est.id})">📝 Создать заказ</button>
+        <button class="btn btn-primary btn-block" onclick="createOrderFromEstimate(${est.id})">рџ“ќ РЎРѕР·РґР°С‚СЊ Р·Р°РєР°Р·</button>
       </div>
     `;
   }
@@ -608,11 +685,11 @@ function renderEstimate(est) {
   if (est.items.length > 0 && canExport) {
     actionsHtml += `
       <div class="export-bar mt-12">
-        <div class="export-title">Выгрузить смету</div>
+        <div class="export-title">Р’С‹РіСЂСѓР·РёС‚СЊ СЃРјРµС‚Сѓ</div>
         <div class="export-buttons">
-          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/pdf?tg_id=${state.user.telegram_id}" target="_blank">📄 PDF</a>
-          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/xlsx?tg_id=${state.user.telegram_id}" target="_blank">📊 XLSX</a>
-          <button class="btn btn-secondary btn-sm" onclick="navigate('qr', {estimateId: ${est.id}})">💳 QR оплата</button>
+          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/pdf?tg_id=${state.user.telegram_id}" target="_blank">рџ“„ PDF</a>
+          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/xlsx?tg_id=${state.user.telegram_id}" target="_blank">рџ“Љ XLSX</a>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('qr', {estimateId: ${est.id}})">рџ’і QR РѕРїР»Р°С‚Р°</button>
         </div>
       </div>
     `;
@@ -620,23 +697,23 @@ function renderEstimate(est) {
 
   container.innerHTML = `
     <div class="cart-header">
-      <h3>Смета #${est.id} <span style="font-weight:400;color:var(--text-muted)">v${est.version}</span></h3>
+      <h3>РЎРјРµС‚Р° #${est.id} <span style="font-weight:400;color:var(--text-muted)">v${est.version}</span></h3>
       <span class="cart-status ${est.status}">${statusLabels[est.status] || est.status}</span>
     </div>
     ${itemsHtml}
     <div class="cart-totals">
       <div class="cart-total-row">
-        <span>Сумма</span>
+        <span>РЎСѓРјРјР°</span>
         <span>${money(est.total)}</span>
       </div>
       ${est.discount > 0 ? `
       <div class="cart-total-row">
-        <span>Скидка</span>
-        <span class="discount">−${money(est.discount)}</span>
+        <span>РЎРєРёРґРєР°</span>
+        <span class="discount">в€’${money(est.discount)}</span>
       </div>
       ` : ''}
       <div class="cart-total-row final">
-        <span>Итого</span>
+        <span>РС‚РѕРіРѕ</span>
         <span class="text-accent">${money(est.final)}</span>
       </div>
     </div>
@@ -648,12 +725,12 @@ function renderEstimate(est) {
   updateFAB();
 }
 
-// ─── Estimate Actions ───────────────────────────────────────
+// в”Ђв”Ђв”Ђ Estimate Actions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function createEstimate() {
   try {
     const est = await api('POST', '/estimates');
     state.activeEstimateId = est.id;
-    toast('Смета создана');
+    toast('РЎРјРµС‚Р° СЃРѕР·РґР°РЅР°');
     navigate('estimate', {id: est.id});
   } catch (e) { toast(e.message, true); }
 }
@@ -668,7 +745,7 @@ async function addToEstimate(serviceItemId, itemName) {
     await api('POST', `/estimates/${state.activeEstimateId}/items`, {
       service_item_id: serviceItemId, quantity: 1,
     });
-    toast(`✅ ${itemName} → смета`);
+    toast(`вњ… ${itemName} в†’ СЃРјРµС‚Р°`);
 
     // Update cart count
     const est = await api('GET', `/estimates/${state.activeEstimateId}`);
@@ -688,16 +765,36 @@ async function changeQty(estimateId, lineItemId, newQty) {
 async function removeItem(estimateId, lineItemId) {
   try {
     await api('DELETE', `/estimates/${estimateId}/items/${lineItemId}`);
-    toast('Удалено');
+    toast('РЈРґР°Р»РµРЅРѕ');
     await loadEstimate(estimateId);
   } catch (e) { toast(e.message, true); }
+}
+
+async function deleteEstimate(estimateId, itemCount, finalAmount) {
+  const confirmed = await confirmAction(
+    `\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u043c\u0435\u0442\u0443 #${estimateId}?\n\u041f\u043e\u0437\u0438\u0446\u0438\u0439: ${itemCount}\n\u0418\u0442\u043e\u0433\u043e: ${money(finalAmount)}\n\n\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043d\u0435\u043e\u0431\u0440\u0430\u0442\u0438\u043c\u043e.`
+  );
+  if (!confirmed) return;
+
+  try {
+    await api('DELETE', `/estimates/${estimateId}`);
+    if (state.activeEstimateId === estimateId) {
+      state.activeEstimateId = null;
+      state.cartItems = 0;
+      updateFAB();
+    }
+    toast('Р РЋР СР ВµРЎвЂљР В° РЎС“Р Т‘Р В°Р В»Р ВµР Р…Р В°');
+    replaceScreen('estimates');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function sendToClient(estimateId) {
   // For now, just change status to client_review
   try {
     await api('POST', `/estimates/${estimateId}/status`, {status: 'client_review'});
-    toast('📤 Смета отправлена клиенту');
+    toast('рџ“¤ РЎРјРµС‚Р° РѕС‚РїСЂР°РІР»РµРЅР° РєР»РёРµРЅС‚Сѓ');
     await loadEstimate(estimateId);
   } catch (e) { toast(e.message, true); }
 }
@@ -705,7 +802,7 @@ async function sendToClient(estimateId) {
 async function approveEstimate(estimateId) {
   try {
     await api('POST', `/estimates/${estimateId}/status`, {status: 'approved'});
-    toast('✅ Смета согласована');
+    toast('вњ… РЎРјРµС‚Р° СЃРѕРіР»Р°СЃРѕРІР°РЅР°');
     await loadEstimate(estimateId);
   } catch (e) { toast(e.message, true); }
 }
@@ -713,45 +810,49 @@ async function approveEstimate(estimateId) {
 async function rejectEstimate(estimateId) {
   try {
     await api('POST', `/estimates/${estimateId}/status`, {status: 'draft'});
-    toast('Смета отклонена');
+    toast('РЎРјРµС‚Р° РѕС‚РєР»РѕРЅРµРЅР°');
     await loadEstimate(estimateId);
   } catch (e) { toast(e.message, true); }
 }
 
 function requestDiscount(estimateId) {
-  const input = prompt('Скидка (формат: % 10 или ₽ 500)\nПричина через пробел:');
+  const input = prompt('Процент скидки\nВведите только число, например: 10 или 12.5');
   if (!input) return;
-  const parts = input.trim().split(/\s+/);
-  if (parts.length < 2) { toast('Неверный формат', true); return; }
-  const type = parts[0].includes('%') ? 'percent' : 'fixed';
-  const value = parseFloat(parts[1]);
-  const reason = parts.slice(2).join(' ') || 'Скидка по согласованию';
+  const value = parseFloat(input.trim().replace('%', '').replace(',', '.'));
+  if (!Number.isFinite(value)) {
+    toast('Укажите только процент скидки', true);
+    return;
+  }
+  if (value <= 0 || value > 50) {
+    toast('Скидка должна быть больше 0% и не превышать 50%', true);
+    return;
+  }
 
   api('POST', `/estimates/${estimateId}/discount`, {
-    discount_type: type, value, reason,
-  }).then(() => toast('Запрос на скидку отправлен'))
+    value,
+  }).then(() => toast(`Скидка обновлена до ${formatPercent(value)}`))
     .catch(e => toast(e.message, true));
 }
 
-// ─── Orders ─────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Orders в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadOrders() {
   const orders = await api('GET', '/orders');
   const container = document.getElementById('orders-list');
 
   if (orders.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>Заказов пока нет</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>Р—Р°РєР°Р·РѕРІ РїРѕРєР° РЅРµС‚</p></div>';
     return;
   }
 
-  const statusIcons = {draft:'📝', submitted:'📤', assigned:'👷', in_progress:'🔨', completed:'✅', paid:'💰', cancelled:'❌'};
-  const statusLabels = {draft:'Черновик', submitted:'Отправлен', assigned:'Назначен', in_progress:'В работе', completed:'Завершён', paid:'Оплачен', cancelled:'Отменён'};
+  const statusIcons = {draft:'рџ“ќ', submitted:'рџ“¤', assigned:'рџ‘·', in_progress:'рџ”Ё', completed:'вњ…', paid:'рџ’°', cancelled:'вќЊ'};
+  const statusLabels = {draft:'Р§РµСЂРЅРѕРІРёРє', submitted:'РћС‚РїСЂР°РІР»РµРЅ', assigned:'РќР°Р·РЅР°С‡РµРЅ', in_progress:'Р’ СЂР°Р±РѕС‚Рµ', completed:'Р—Р°РІРµСЂС€С‘РЅ', paid:'РћРїР»Р°С‡РµРЅ', cancelled:'РћС‚РјРµРЅС‘РЅ'};
 
   container.innerHTML = orders.map(o => `
     <div class="order-row" onclick="navigate('order', {id: ${o.id}})">
-      <div style="font-size:24px">${statusIcons[o.status] || '📋'}</div>
+      <div style="font-size:24px">${statusIcons[o.status] || 'рџ“‹'}</div>
       <div style="flex:1">
-        <div style="font-weight:600">Заказ #${o.id}</div>
-        <div style="font-size:12px;color:var(--text-muted)">${statusLabels[o.status] || o.status}${o.address ? ' · ' + o.address.substring(0,25) : ''}</div>
+        <div style="font-weight:600">Р—Р°РєР°Р· #${o.id}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${statusLabels[o.status] || o.status}${o.address ? ' В· ' + o.address.substring(0,25) : ''}</div>
       </div>
     </div>
   `).join('');
@@ -761,25 +862,34 @@ async function loadOrder(orderId) {
   const order = await api('GET', `/orders/${orderId}`);
   const container = document.getElementById('order-detail');
   const caps = order.capabilities || {};
+  const reasonOptions = Array.isArray(order.cancel_reasons) ? order.cancel_reasons : [];
 
-  const statusIcons = {draft:'📝', submitted:'📤', assigned:'👷', in_progress:'🔨', completed:'✅', paid:'💰', cancelled:'❌'};
-  const statusLabels = {draft:'Черновик', submitted:'Отправлен', assigned:'Назначен', in_progress:'В работе', completed:'Завершён', paid:'Оплачен', cancelled:'Отменён'};
-  const urgencyLabels = {normal:'Обычная', urgent:'Срочная', emergency:'Экстренная'};
+  if (!state.currentOrder || state.currentOrder.id !== order.id) {
+    state.orderCancelReasonPickerOpen = false;
+  }
+  if (!caps.can_cancel || reasonOptions.length === 0) {
+    state.orderCancelReasonPickerOpen = false;
+  }
+  state.currentOrder = order;
+
+  const statusIcons = {draft:'рџ“ќ', submitted:'рџ“¤', assigned:'рџ‘·', in_progress:'рџ”Ё', completed:'вњ…', paid:'рџ’°', cancelled:'вќЊ'};
+  const statusLabels = {draft:'Р§РµСЂРЅРѕРІРёРє', submitted:'РћС‚РїСЂР°РІР»РµРЅ', assigned:'РќР°Р·РЅР°С‡РµРЅ', in_progress:'Р’ СЂР°Р±РѕС‚Рµ', completed:'Р—Р°РІРµСЂС€С‘РЅ', paid:'РћРїР»Р°С‡РµРЅ', cancelled:'РћС‚РјРµРЅС‘РЅ'};
+  const urgencyLabels = {normal:'РћР±С‹С‡РЅР°СЏ', urgent:'РЎСЂРѕС‡РЅР°СЏ', emergency:'Р­РєСЃС‚СЂРµРЅРЅР°СЏ'};
 
   // Estimate items section
   let itemsHtml = '';
   if (order.estimate) {
     itemsHtml = `
       <div class="card mt-12">
-        <div class="card-title">Состав работ (v${order.estimate.version})</div>
+        <div class="card-title">РЎРѕСЃС‚Р°РІ СЂР°Р±РѕС‚ (v${order.estimate.version})</div>
         ${order.estimate.items.map((it, i) => `
           <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px">
-            <span>${i+1}. ${it.name} × ${it.quantity}</span>
+            <span>${i+1}. ${it.name} Г— ${it.quantity}</span>
             <span style="white-space:nowrap">${money(it.subtotal)}</span>
           </div>
         `).join('')}
         <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:15px">
-          <span>Итого</span>
+          <span>РС‚РѕРіРѕ</span>
           <span class="text-accent">${money(order.estimate.final)}</span>
         </div>
       </div>
@@ -791,7 +901,7 @@ async function loadOrder(orderId) {
   if (order.history && order.history.length > 0) {
     historyHtml = `
       <div class="card mt-12">
-        <div class="card-title">История</div>
+        <div class="card-title">РСЃС‚РѕСЂРёСЏ</div>
         <div class="timeline">
           ${order.history.map(h => `
             <div class="timeline-item">
@@ -799,6 +909,7 @@ async function loadOrder(orderId) {
               <div class="timeline-content">
                 <span class="timeline-status">${statusLabels[h.to] || h.to}</span>
                 <span class="timeline-time">${h.at ? new Date(h.at).toLocaleString('ru-RU', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : ''}</span>
+                ${h.reason ? `<div class="text-muted" style="margin-top:4px">${escapeHtml(h.reason)}</div>` : ''}
               </div>
             </div>
           `).join('')}
@@ -810,37 +921,61 @@ async function loadOrder(orderId) {
   // Actions based on status
   let actionsHtml = '';
   if (caps.can_submit) {
-    actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'submitted')">📤 Отправить заказ</button>`;
+    actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'submitted')">рџ“¤ РћС‚РїСЂР°РІРёС‚СЊ Р·Р°РєР°Р·</button>`;
   } else if (caps.can_assign) {
-    actionsHtml = `<button class="btn btn-primary btn-block" onclick="assignOrder(${order.id})">✋ Взять заказ</button>`;
+    actionsHtml = `<button class="btn btn-primary btn-block" onclick="assignOrder(${order.id})">вњ‹ Р’Р·СЏС‚СЊ Р·Р°РєР°Р·</button>`;
   } else if (caps.can_start) {
-    actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'in_progress')">🔨 Начать работу</button>`;
+    actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'in_progress')">рџ”Ё РќР°С‡Р°С‚СЊ СЂР°Р±РѕС‚Сѓ</button>`;
   } else if (caps.can_complete) {
-    actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'completed')">✅ Завершить</button>`;
+    actionsHtml = `<button class="btn btn-primary btn-block" onclick="updateOrderStatus(${order.id}, 'completed')">вњ… Р—Р°РІРµСЂС€РёС‚СЊ</button>`;
   } else if (caps.can_pay) {
-    actionsHtml = `<button class="btn btn-primary btn-block" onclick="showPayment(${order.id})">💳 Оплатить</button>`;
+    actionsHtml = `<button class="btn btn-primary btn-block" onclick="showPayment(${order.id})">рџ’і РћРїР»Р°С‚РёС‚СЊ</button>`;
   }
 
   if (caps.can_cancel) {
-    actionsHtml += `<button class="btn btn-ghost btn-block mt-8" onclick="updateOrderStatus(${order.id}, 'cancelled')">Отменить заказ</button>`;
+    if (reasonOptions.length > 0) {
+      actionsHtml += `
+        <button class="btn btn-ghost btn-block mt-8" onclick="toggleOrderCancelReasonPicker()">
+          Отменить заказ
+        </button>
+      `;
+      if (state.orderCancelReasonPickerOpen) {
+        actionsHtml += `
+          <div class="card mt-8">
+            <div class="card-title">Причина отмены со стороны мастера</div>
+            <div class="card-subtitle">Выберите причину, не зависящую от клиента.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+              ${reasonOptions.map(reason => `
+                <button class="btn btn-secondary btn-block" onclick="cancelOrderWithReason('${esc(reason.code)}')">
+                  ${escapeHtml(reason.label)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+    } else {
+      actionsHtml += `<button class="btn btn-ghost btn-block mt-8" onclick="updateOrderStatus(${order.id}, 'cancelled')">Отменить заказ</button>`;
+    }
   }
 
   container.innerHTML = `
     <div class="card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <div style="font-size:32px">${statusIcons[order.status] || '📋'}</div>
+        <div style="font-size:32px">${statusIcons[order.status] || 'рџ“‹'}</div>
         <div>
-          <h3 style="font-size:17px;font-weight:700">Заказ #${order.id}</h3>
+          <h3 style="font-size:17px;font-weight:700">Р—Р°РєР°Р· #${order.id}</h3>
           <span class="cart-status ${order.status}">${statusLabels[order.status] || order.status}</span>
         </div>
       </div>
       <div class="order-meta">
-        ${order.address ? `<div class="meta-row"><span class="meta-icon">📍</span> ${order.address}</div>` : ''}
-        <div class="meta-row"><span class="meta-icon">⚡</span> ${urgencyLabels[order.urgency] || order.urgency}</div>
-        ${order.client_name ? `<div class="meta-row"><span class="meta-icon">👤</span> Клиент: ${order.client_name}</div>` : ''}
-        ${order.master_name ? `<div class="meta-row"><span class="meta-icon">🔧</span> Мастер: ${order.master_name}</div>` : ''}
-        ${order.notes ? `<div class="meta-row"><span class="meta-icon">📝</span> ${order.notes}</div>` : ''}
-        ${order.payment_status ? `<div class="meta-row"><span class="meta-icon">💳</span> Оплата: ${order.payment_status}</div>` : ''}
+        ${order.address ? `<div class="meta-row"><span class="meta-icon">рџ“Ќ</span> ${order.address}</div>` : ''}
+        <div class="meta-row"><span class="meta-icon">вљЎ</span> ${urgencyLabels[order.urgency] || order.urgency}</div>
+        ${order.client_name ? `<div class="meta-row"><span class="meta-icon">рџ‘¤</span> РљР»РёРµРЅС‚: ${order.client_name}</div>` : ''}
+        ${order.master_name ? `<div class="meta-row"><span class="meta-icon">рџ”§</span> РњР°СЃС‚РµСЂ: ${order.master_name}</div>` : ''}
+        ${order.notes ? `<div class="meta-row"><span class="meta-icon">рџ“ќ</span> ${order.notes}</div>` : ''}
+        ${order.cancellation_reason ? `<div class="meta-row"><span class="meta-icon">❌</span> Причина отмены: ${escapeHtml(order.cancellation_reason)}</div>` : ''}
+        ${order.payment_status ? `<div class="meta-row"><span class="meta-icon">рџ’і</span> РћРїР»Р°С‚Р°: ${order.payment_status}</div>` : ''}
       </div>
     </div>
     ${itemsHtml}
@@ -849,10 +984,39 @@ async function loadOrder(orderId) {
   `;
 }
 
-async function updateOrderStatus(orderId, status) {
+function toggleOrderCancelReasonPicker() {
+  if (!state.currentOrder) return;
+  state.orderCancelReasonPickerOpen = !state.orderCancelReasonPickerOpen;
+  loadOrder(state.currentOrder.id).catch(e => toast(e.message, true));
+}
+
+function cancelOrderWithReason(reasonCode) {
+  if (!state.currentOrder) return;
+  const selectedReason = (state.currentOrder.cancel_reasons || []).find(item => item.code === reasonCode);
+  updateOrderStatus(state.currentOrder.id, 'cancelled', {
+    reason: reasonCode,
+    confirmText: selectedReason
+      ? `Отменить заказ по причине: ${selectedReason.label}?`
+      : 'Отменить заказ?',
+  });
+}
+
+async function updateOrderStatus(orderId, status, options = {}) {
   try {
-    await api('POST', `/orders/${orderId}/status`, {status});
-    toast('Статус обновлён');
+    let reason = options.reason || null;
+    if (status === 'cancelled') {
+      if (!reason) {
+        const input = prompt('Укажите причину отмены заказа:');
+        if (!input) return;
+        reason = input.trim();
+      }
+      const confirmed = await confirmAction(options.confirmText || 'Отменить заказ?');
+      if (!confirmed) return;
+    }
+
+    await api('POST', `/orders/${orderId}/status`, {status, reason});
+    state.orderCancelReasonPickerOpen = false;
+    toast('РЎС‚Р°С‚СѓСЃ РѕР±РЅРѕРІР»С‘РЅ');
     await loadOrder(orderId);
   } catch (e) { toast(e.message, true); }
 }
@@ -860,7 +1024,7 @@ async function updateOrderStatus(orderId, status) {
 async function assignOrder(orderId) {
   try {
     await api('POST', `/orders/${orderId}/assign-self`);
-    toast('Заказ назначен вам');
+    toast('Р—Р°РєР°Р· РЅР°Р·РЅР°С‡РµРЅ РІР°Рј');
     await loadOrder(orderId);
   } catch (e) { toast(e.message, true); }
 }
@@ -871,61 +1035,61 @@ async function showPayment(orderId) {
     const container = document.getElementById('order-detail');
     container.innerHTML += `
       <div class="card mt-12 payment-card">
-        <div class="card-title">💳 Оплата</div>
+        <div class="card-title">рџ’і РћРїР»Р°С‚Р°</div>
         <div class="payment-amount">${money(info.amount)}</div>
-        ${info.recipient ? `<div class="meta-row">Получатель: ${info.recipient}</div>` : ''}
-        ${info.bank_name ? `<div class="meta-row">Банк: ${info.bank_name}</div>` : ''}
-        ${info.phone ? `<div class="meta-row">Телефон: ${info.phone}</div>` : ''}
-        ${info.qr_data ? `<div class="meta-row" style="margin-top:8px;font-size:12px;color:var(--text-muted)">QR-данные: ${info.qr_data}</div>` : ''}
+        ${info.recipient ? `<div class="meta-row">РџРѕР»СѓС‡Р°С‚РµР»СЊ: ${info.recipient}</div>` : ''}
+        ${info.bank_name ? `<div class="meta-row">Р‘Р°РЅРє: ${info.bank_name}</div>` : ''}
+        ${info.phone ? `<div class="meta-row">РўРµР»РµС„РѕРЅ: ${info.phone}</div>` : ''}
+        ${info.qr_data ? `<div class="meta-row" style="margin-top:8px;font-size:12px;color:var(--text-muted)">QR-РґР°РЅРЅС‹Рµ: ${info.qr_data}</div>` : ''}
       </div>
     `;
   } catch (e) { toast(e.message, true); }
 }
 
 async function createOrderFromEstimate(estimateId) {
-  const address = prompt('Адрес выполнения работ:');
+  const address = prompt('РђРґСЂРµСЃ РІС‹РїРѕР»РЅРµРЅРёСЏ СЂР°Р±РѕС‚:');
   if (!address) return;
   try {
     const order = await api('POST', '/orders', {
       estimate_id: estimateId, address, urgency: 'normal',
     });
-    toast(`Заказ #${order.id} создан`);
+    toast(`Р—Р°РєР°Р· #${order.id} СЃРѕР·РґР°РЅ`);
     navigate('orders');
   } catch (e) { toast(e.message, true); }
 }
 
-// ─── Earnings ───────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Earnings в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadEarnings() {
   const data = await api('GET', '/earnings');
   document.getElementById('earnings-content').innerHTML = `
     <div class="earning-stat">
       <div class="earning-value">${money(data.total_earned)}</div>
-      <div class="earning-label">Общий заработок</div>
+      <div class="earning-label">РћР±С‰РёР№ Р·Р°СЂР°Р±РѕС‚РѕРє</div>
     </div>
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-value" style="font-size:18px">${data.completed}</div>
-        <div class="stat-label">Выполнено заказов</div>
+        <div class="stat-label">Р’С‹РїРѕР»РЅРµРЅРѕ Р·Р°РєР°Р·РѕРІ</div>
       </div>
       <div class="stat-card">
         <div class="stat-value" style="font-size:18px">${money(data.pending)}</div>
-        <div class="stat-label">Ожидает оплаты</div>
+        <div class="stat-label">РћР¶РёРґР°РµС‚ РѕРїР»Р°С‚С‹</div>
       </div>
     </div>
     <div class="card mt-12">
-      <div class="card-title">Комиссия платформы</div>
+      <div class="card-title">РљРѕРјРёСЃСЃРёСЏ РїР»Р°С‚С„РѕСЂРјС‹</div>
       <p style="font-size:14px;color:var(--text-muted);margin-top:4px">${money(data.commission_paid)}</p>
     </div>
   `;
 }
 
-// ─── Approvals ──────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Approvals в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadApprovals() {
   const items = await api('GET', '/approvals');
   const container = document.getElementById('approvals-list');
 
   if (items.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>Нет ожидающих согласований</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>РќРµС‚ РѕР¶РёРґР°СЋС‰РёС… СЃРѕРіР»Р°СЃРѕРІР°РЅРёР№</p></div>';
     return;
   }
 
@@ -933,13 +1097,13 @@ async function loadApprovals() {
     <div class="card">
       <div class="card-header">
         <div>
-          <div class="card-title">Смета #${dr.estimate_id}</div>
-          <div class="card-subtitle">${dr.type === 'percent' ? dr.value + '%' : money(dr.value)} — ${dr.reason}</div>
+          <div class="card-title">РЎРјРµС‚Р° #${dr.estimate_id}</div>
+          <div class="card-subtitle">${dr.type === 'fixed' ? `${money(dr.value)} (legacy)` : formatPercent(dr.value)}</div>
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary btn-sm flex-1" onclick="processApproval(${dr.id}, 'approve')">✅ Одобрить</button>
-        <button class="btn btn-danger btn-sm flex-1" onclick="processApproval(${dr.id}, 'reject')">❌ Отклонить</button>
+        <button class="btn btn-primary btn-sm flex-1" onclick="processApproval(${dr.id}, 'approve')">вњ… РћРґРѕР±СЂРёС‚СЊ</button>
+        <button class="btn btn-danger btn-sm flex-1" onclick="processApproval(${dr.id}, 'reject')">вќЊ РћС‚РєР»РѕРЅРёС‚СЊ</button>
       </div>
     </div>
   `).join('');
@@ -948,12 +1112,85 @@ async function loadApprovals() {
 async function processApproval(requestId, action) {
   try {
     await api('POST', `/approvals/${requestId}`, {action});
-    toast(action === 'approve' ? '✅ Одобрено' : '❌ Отклонено');
+    toast(action === 'approve' ? 'вњ… РћРґРѕР±СЂРµРЅРѕ' : 'вќЊ РћС‚РєР»РѕРЅРµРЅРѕ');
     await loadApprovals();
   } catch (e) { toast(e.message, true); }
 }
 
-// ─── Analytics ──────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Suggestions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+async function loadSuggestionsComposer() {
+  const container = document.getElementById('suggestions-content');
+  container.innerHTML = `
+    <div class="card suggestion-card">
+      <div class="card-title">рџ’Ў РџСЂРµРґР»РѕР¶РёС‚СЊ СѓР»СѓС‡С€РµРЅРёРµ</div>
+      <div class="card-subtitle">
+        РќР°РїРёС€РёС‚Рµ РѕРґРЅРёРј СЃРѕРѕР±С‰РµРЅРёРµРј РёРґРµСЋ, РїСЂРѕР±Р»РµРјСѓ РёР»Рё РЅРµСѓРґРѕР±СЃС‚РІРѕ.
+        РўРµРєСЃС‚ СЃРѕС…СЂР°РЅРёС‚СЃСЏ Рё СѓР№РґС‘С‚ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєР°Рј РІРѕ РІРЅСѓС‚СЂРµРЅРЅРёРµ СѓРІРµРґРѕРјР»РµРЅРёСЏ.
+      </div>
+      <div class="form-group mt-12">
+        <label class="form-label" for="suggestion-message">РўРµРєСЃС‚ РїСЂРµРґР»РѕР¶РµРЅРёСЏ</label>
+        <textarea
+          id="suggestion-message"
+          class="form-input suggestion-textarea"
+          placeholder="РќР°РїСЂРёРјРµСЂ: РІ СЌРєСЂР°РЅРµ СЃРјРµС‚С‹ РЅРµ С…РІР°С‚Р°РµС‚ Р±С‹СЃС‚СЂРѕР№ РєРЅРѕРїРєРё РґСѓР±Р»РёСЂРѕРІР°РЅРёСЏ, РёР·-Р·Р° СЌС‚РѕРіРѕ РјС‹ С‚РµСЂСЏРµРј РІСЂРµРјСЏ РЅР° РїРѕРІС‚РѕСЂРЅРѕР№ СЃР±РѕСЂРєРµ..."
+          oninput="updateSuggestionCounter()"
+        ></textarea>
+        <div class="suggestion-meta">
+          <span class="text-muted">РњРёРЅРёРјСѓРј 10 СЃРёРјРІРѕР»РѕРІ, РјРѕР¶РЅРѕ РїРёСЃР°С‚СЊ РІ СЃРІРѕР±РѕРґРЅРѕР№ С„РѕСЂРјРµ.</span>
+          <span id="suggestion-counter" class="suggestion-counter">0/1500</span>
+        </div>
+      </div>
+      <div class="suggestion-hints">
+        <div class="suggestion-hint"><strong>Р§С‚Рѕ РЅРµ С‚Р°Рє?</strong> Р“РґРµ Рё РєР°РєРѕР№ РёРјРµРЅРЅРѕ С†РµРЅР°СЂРёР№ РЅРµСѓРґРѕР±РµРЅ.</div>
+        <div class="suggestion-hint"><strong>Р§С‚Рѕ РЅСѓР¶РЅРѕ?</strong> РљР°РєРѕР№ СЂРµР·СѓР»СЊС‚Р°С‚ Р±С‹Р» Р±С‹ РїРѕР»РµР·РµРЅ.</div>
+        <div class="suggestion-hint"><strong>Р§С‚Рѕ СЃР»РѕРјР°РЅРѕ?</strong> Р•СЃР»Рё СЌС‚Рѕ Р±Р°Рі, РєРѕСЂРѕС‚РєРѕ РѕРїРёС€РёС‚Рµ С€Р°РіРё Рё СЌС„С„РµРєС‚.</div>
+      </div>
+      <button id="suggestion-submit" class="btn btn-primary btn-block mt-12" onclick="submitSuggestion()">
+        РћС‚РїСЂР°РІРёС‚СЊ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєР°Рј
+      </button>
+    </div>
+  `;
+  updateSuggestionCounter();
+}
+
+function updateSuggestionCounter() {
+  const input = document.getElementById('suggestion-message');
+  const counter = document.getElementById('suggestion-counter');
+  if (!input || !counter) return;
+
+  const length = input.value.trim().length;
+  counter.textContent = `${length}/1500`;
+  counter.classList.toggle('text-accent', length >= 10 && length <= 1500);
+}
+
+async function submitSuggestion() {
+  const input = document.getElementById('suggestion-message');
+  const button = document.getElementById('suggestion-submit');
+  if (!input || !button) return;
+
+  const message = input.value.trim();
+  if (message.length < 10) {
+    toast('РћРїРёС€РёС‚Рµ РїСЂРµРґР»РѕР¶РµРЅРёРµ С‡СѓС‚СЊ РїРѕРґСЂРѕР±РЅРµРµ', true);
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    const payload = await api('POST', '/suggestions', {message});
+    input.value = '';
+    updateSuggestionCounter();
+    const deliveredText = payload.recipient_count
+      ? `РџСЂРµРґР»РѕР¶РµРЅРёРµ #${payload.id} РѕС‚РїСЂР°РІР»РµРЅРѕ`
+      : `РџСЂРµРґР»РѕР¶РµРЅРёРµ #${payload.id} СЃРѕС…СЂР°РЅРµРЅРѕ`;
+    toast(deliveredText);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// в”Ђв”Ђв”Ђ Analytics в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadAnalytics() {
   try {
     const data = await api('GET', '/analytics/overview');
@@ -964,25 +1201,25 @@ async function loadAnalytics() {
 
     container.innerHTML = `
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-value">${data.users}</div><div class="stat-label">Пользователей</div></div>
-        <div class="stat-card"><div class="stat-value">${data.masters}</div><div class="stat-label">Мастеров</div></div>
-        <div class="stat-card"><div class="stat-value">${data.estimates}</div><div class="stat-label">Смет</div></div>
-        <div class="stat-card"><div class="stat-value">${data.orders}</div><div class="stat-label">Заказов</div></div>
+        <div class="stat-card"><div class="stat-value">${data.users}</div><div class="stat-label">РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№</div></div>
+        <div class="stat-card"><div class="stat-value">${data.masters}</div><div class="stat-label">РњР°СЃС‚РµСЂРѕРІ</div></div>
+        <div class="stat-card"><div class="stat-value">${data.estimates}</div><div class="stat-label">РЎРјРµС‚</div></div>
+        <div class="stat-card"><div class="stat-value">${data.orders}</div><div class="stat-label">Р—Р°РєР°Р·РѕРІ</div></div>
       </div>
 
       <div class="analytics-card">
-        <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">💰 Финансы</h3>
-        <div class="cart-total-row"><span>Оборот</span><span class="font-bold">${money(data.gross)}</span></div>
-        <div class="cart-total-row"><span>Комиссия</span><span class="font-bold">${money(data.platform_fee)}</span></div>
-        <div class="cart-total-row"><span>  Ст. мастерам</span><span>${money(data.senior_share)}</span></div>
-        <div class="cart-total-row"><span>  Админам</span><span>${money(data.admin_share)}</span></div>
-        <div class="cart-total-row final"><span>Чистая прибыль</span><span class="text-accent">${money(data.platform_net)}</span></div>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">рџ’° Р¤РёРЅР°РЅСЃС‹</h3>
+        <div class="cart-total-row"><span>РћР±РѕСЂРѕС‚</span><span class="font-bold">${money(data.gross)}</span></div>
+        <div class="cart-total-row"><span>РљРѕРјРёСЃСЃРёСЏ</span><span class="font-bold">${money(data.platform_fee)}</span></div>
+        <div class="cart-total-row"><span>  РЎС‚. РјР°СЃС‚РµСЂР°Рј</span><span>${money(data.senior_share)}</span></div>
+        <div class="cart-total-row"><span>  РђРґРјРёРЅР°Рј</span><span>${money(data.admin_share)}</span></div>
+        <div class="cart-total-row final"><span>Р§РёСЃС‚Р°СЏ РїСЂРёР±С‹Р»СЊ</span><span class="text-accent">${money(data.platform_net)}</span></div>
       </div>
 
       <div class="analytics-card">
-        <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">📊 Воронка заказов</h3>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">рџ“Љ Р’РѕСЂРѕРЅРєР° Р·Р°РєР°Р·РѕРІ</h3>
         ${['draft','submitted','assigned','in_progress','completed','paid','cancelled'].map(s => {
-          const labels = {draft:'Черновики', submitted:'Отправлены', assigned:'Назначены', in_progress:'В работе', completed:'Завершены', paid:'Оплачены', cancelled:'Отменены'};
+          const labels = {draft:'Р§РµСЂРЅРѕРІРёРєРё', submitted:'РћС‚РїСЂР°РІР»РµРЅС‹', assigned:'РќР°Р·РЅР°С‡РµРЅС‹', in_progress:'Р’ СЂР°Р±РѕС‚Рµ', completed:'Р—Р°РІРµСЂС€РµРЅС‹', paid:'РћРїР»Р°С‡РµРЅС‹', cancelled:'РћС‚РјРµРЅРµРЅС‹'};
           const v = funnel[s] || 0;
           const pct = Math.round(v / maxFunnel * 100);
           return `
@@ -998,13 +1235,13 @@ async function loadAnalytics() {
   } catch (e) { toast(e.message, true); }
 }
 
-// ─── Profile ────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Profile в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 function loadProfile() {
   const u = state.user;
   const primaryRole = highestRole(u.roles);
   const roleLabels = {
-    product_owner: '🏢 Product Owner', admin: '⚙️ Администратор',
-    senior_master: '👨‍🔧 Старший мастер', master: '🔧 Мастер', client: '👤 Клиент',
+    product_owner: 'рџЏў Product Owner', admin: 'вљ™пёЏ РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ',
+    senior_master: 'рџ‘ЁвЂЌрџ”§ РЎС‚Р°СЂС€РёР№ РјР°СЃС‚РµСЂ', master: 'рџ”§ РњР°СЃС‚РµСЂ', client: 'рџ‘¤ РљР»РёРµРЅС‚',
   };
 
   const isMaster = hasRole(u.roles, 'master');
@@ -1013,26 +1250,27 @@ function loadProfile() {
   const maxRoleLabel = u.max_role_label || activeRoleLabel;
 
   let menuItems = '';
-  menuItems += profileItem('👤', 'Личные данные и реквизиты', "navigate('profile-edit')");
+  menuItems += profileItem('рџ‘¤', 'Р›РёС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ Рё СЂРµРєРІРёР·РёС‚С‹', "navigate('profile-edit')");
   if (isMaster) {
-    menuItems += profileItem('🏦', 'Мои реквизиты и QR', "navigate('qr', {profile: 1})");
-    menuItems += profileItem('💰', 'Доходы', "navigate('earnings')");
-    menuItems += profileItem('📊', 'Мои сметы', "navigate('estimates')");
+    menuItems += profileItem('рџЏ¦', 'РњРѕРё СЂРµРєРІРёР·РёС‚С‹ Рё QR', "navigate('qr', {profile: 1})");
+    menuItems += profileItem('рџ’°', 'Р”РѕС…РѕРґС‹', "navigate('earnings')");
+    menuItems += profileItem('рџ“Љ', 'РњРѕРё СЃРјРµС‚С‹', "navigate('estimates')");
   }
-  menuItems += profileItem('📝', 'Мои заказы', "navigate('orders')");
+  menuItems += profileItem('рџ“ќ', 'РњРѕРё Р·Р°РєР°Р·С‹', "navigate('orders')");
+  menuItems += profileItem('рџ’Ў', 'РџСЂРµРґР»РѕР¶РµРЅРёСЏ', "navigate('suggestions')");
   if (isAdmin) {
-    menuItems += profileItem('📈', 'Аналитика', "navigate('analytics')");
-    menuItems += profileItem('✅', 'Согласования', "navigate('approvals')");
+    menuItems += profileItem('рџ“€', 'РђРЅР°Р»РёС‚РёРєР°', "navigate('analytics')");
+    menuItems += profileItem('вњ…', 'РЎРѕРіР»Р°СЃРѕРІР°РЅРёСЏ', "navigate('approvals')");
   }
 
   const roleContext = u.can_switch_role ? `
     <div class="card profile-context">
-      <div class="card-title">🎭 Режим роли</div>
-      <div class="profile-meta"><span>Сейчас</span><strong>${activeRoleLabel}</strong></div>
-      <div class="profile-meta"><span>Максимум</span><strong>${maxRoleLabel}</strong></div>
-      ${u.is_role_switched ? '<div class="profile-note">Включен временный тестовый контур прав. Прямые роли в базе не меняются.</div>' : ''}
+      <div class="card-title">рџЋ­ Р РµР¶РёРј СЂРѕР»Рё</div>
+      <div class="profile-meta"><span>РЎРµР№С‡Р°СЃ</span><strong>${activeRoleLabel}</strong></div>
+      <div class="profile-meta"><span>РњР°РєСЃРёРјСѓРј</span><strong>${maxRoleLabel}</strong></div>
+      ${u.is_role_switched ? '<div class="profile-note">Р’РєР»СЋС‡РµРЅ РІСЂРµРјРµРЅРЅС‹Р№ С‚РµСЃС‚РѕРІС‹Р№ РєРѕРЅС‚СѓСЂ РїСЂР°РІ. РџСЂСЏРјС‹Рµ СЂРѕР»Рё РІ Р±Р°Р·Рµ РЅРµ РјРµРЅСЏСЋС‚СЃСЏ.</div>' : ''}
       <div class="role-switcher">
-        <button class="role-chip ${!u.role_override ? 'active' : ''}" onclick="setRoleMode(null)">Авто</button>
+        <button class="role-chip ${!u.role_override ? 'active' : ''}" onclick="setRoleMode(null)">РђРІС‚Рѕ</button>
         ${(u.available_roles || []).map(role => `
           <button
             class="role-chip ${u.active_role === role.code ? 'active' : ''}"
@@ -1048,7 +1286,7 @@ function loadProfile() {
       <div class="profile-avatar">${u.name[0]}</div>
       <div class="profile-name">${u.name}</div>
       <div class="profile-roles">${activeRoleLabel}</div>
-      ${u.is_role_switched ? `<div class="profile-roles">Максимальная роль: ${maxRoleLabel}</div>` : ''}
+      ${u.is_role_switched ? `<div class="profile-roles">РњР°РєСЃРёРјР°Р»СЊРЅР°СЏ СЂРѕР»СЊ: ${maxRoleLabel}</div>` : ''}
     </div>
     ${roleContext}
     <div class="profile-menu">
@@ -1077,13 +1315,13 @@ async function setRoleMode(roleCode) {
     } else {
       loadProfile();
     }
-    toast(`Режим: ${payload.active_role_label}`);
+    toast(`Р РµР¶РёРј: ${payload.active_role_label}`);
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-// ─── Profile Editor ─────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Profile Editor в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadProfileEdit() {
   let p;
   try {
@@ -1095,31 +1333,31 @@ async function loadProfileEdit() {
   const container = document.getElementById('profile-edit-content');
   container.innerHTML = `
     <div class="card">
-      <div class="card-title">👤 Личные данные</div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Эти данные используются в шапке смет (PDF/XLSX)</p>
-      ${formField('pe-full_name', 'ФИО', p.full_name, 'Иванов Иван Иванович')}
-      ${formField('pe-phone', 'Телефон', p.phone, '+7 999 123-45-67')}
+      <div class="card-title">рџ‘¤ Р›РёС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Р­С‚Рё РґР°РЅРЅС‹Рµ РёСЃРїРѕР»СЊР·СѓСЋС‚СЃСЏ РІ С€Р°РїРєРµ СЃРјРµС‚ (PDF/XLSX)</p>
+      ${formField('pe-full_name', 'Р¤РРћ', p.full_name, 'РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡')}
+      ${formField('pe-phone', 'РўРµР»РµС„РѕРЅ', p.phone, '+7 999 123-45-67')}
       ${formField('pe-email', 'Email', p.email, 'master@mail.ru')}
       ${formField('pe-telegram_username', 'Telegram', p.telegram_username, '@username')}
-      ${formField('pe-company_name', 'Компания / ИП', p.company_name, 'ИП Иванов И.И.')}
-      ${formField('pe-inn', 'ИНН', p.inn, '123456789012')}
-      ${formField('pe-address', 'Адрес', p.address, 'г. Стерлитамак, ул. ...')}
-      ${formField('pe-specialization', 'Специализация', p.specialization, 'Электрик, Сантехник')}
+      ${formField('pe-company_name', 'РљРѕРјРїР°РЅРёСЏ / РРџ', p.company_name, 'РРџ РРІР°РЅРѕРІ Р.Р.')}
+      ${formField('pe-inn', 'РРќРќ', p.inn, '123456789012')}
+      ${formField('pe-address', 'РђРґСЂРµСЃ', p.address, 'Рі. РЎС‚РµСЂР»РёС‚Р°РјР°Рє, СѓР». ...')}
+      ${formField('pe-specialization', 'РЎРїРµС†РёР°Р»РёР·Р°С†РёСЏ', p.specialization, 'Р­Р»РµРєС‚СЂРёРє, РЎР°РЅС‚РµС…РЅРёРє')}
     </div>
 
     <div class="card mt-12">
-      <div class="card-title">🏦 Банковские реквизиты</div>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Для QR-кода оплаты и реквизитов в смете</p>
-      ${formField('pe-payment_recipient', 'Получатель платежа', p.payment_recipient, 'ИП Иванов Иван Иванович')}
-      ${formField('pe-bank_name', 'Банк', p.bank_name, 'Сбербанк')}
-      ${formField('pe-settlement_account', 'Расчётный счёт', p.settlement_account, '40802810...')}
-      ${formField('pe-correspondent_account', 'Корр. счёт', p.correspondent_account, '30101810...')}
-      ${formField('pe-bik', 'БИК', p.bik, '042202603')}
-      ${formField('pe-card_number', 'Номер карты', p.card_number, '2202 **** **** 1234')}
-      ${formField('pe-sbp_phone', 'Телефон СБП', p.sbp_phone, '+7 999 123-45-67')}
+      <div class="card-title">рџЏ¦ Р‘Р°РЅРєРѕРІСЃРєРёРµ СЂРµРєРІРёР·РёС‚С‹</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Р”Р»СЏ QR-РєРѕРґР° РѕРїР»Р°С‚С‹ Рё СЂРµРєРІРёР·РёС‚РѕРІ РІ СЃРјРµС‚Рµ</p>
+      ${formField('pe-payment_recipient', 'РџРѕР»СѓС‡Р°С‚РµР»СЊ РїР»Р°С‚РµР¶Р°', p.payment_recipient, 'РРџ РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡')}
+      ${formField('pe-bank_name', 'Р‘Р°РЅРє', p.bank_name, 'РЎР±РµСЂР±Р°РЅРє')}
+      ${formField('pe-settlement_account', 'Р Р°СЃС‡С‘С‚РЅС‹Р№ СЃС‡С‘С‚', p.settlement_account, '40802810...')}
+      ${formField('pe-correspondent_account', 'РљРѕСЂСЂ. СЃС‡С‘С‚', p.correspondent_account, '30101810...')}
+      ${formField('pe-bik', 'Р‘РРљ', p.bik, '042202603')}
+      ${formField('pe-card_number', 'РќРѕРјРµСЂ РєР°СЂС‚С‹', p.card_number, '2202 **** **** 1234')}
+      ${formField('pe-sbp_phone', 'РўРµР»РµС„РѕРЅ РЎР‘Рџ', p.sbp_phone, '+7 999 123-45-67')}
     </div>
 
-    <button class="btn btn-primary btn-block mt-12" onclick="saveProfile()">💾 Сохранить</button>
+    <button class="btn btn-primary btn-block mt-12" onclick="saveProfile()">рџ’ѕ РЎРѕС…СЂР°РЅРёС‚СЊ</button>
   `;
 }
 
@@ -1140,11 +1378,11 @@ async function saveProfile() {
   }
   try {
     await api('PUT', '/profile', data);
-    toast('Данные сохранены');
+    toast('Р”Р°РЅРЅС‹Рµ СЃРѕС…СЂР°РЅРµРЅС‹');
   } catch (e) { toast(e.message, true); }
 }
 
-// ─── QR Payment Viewer ─────────────────────────────────────
+// в”Ђв”Ђв”Ђ QR Payment Viewer в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function loadQR(estimateId, profileMode = false) {
   const container = document.getElementById('qr-content');
 
@@ -1153,10 +1391,25 @@ async function loadQR(estimateId, profileMode = false) {
       ? await api('GET', '/profile/payment-qr')
       : await api('GET', `/estimates/${estimateId}/qr`);
 
-    const title = profileMode ? 'Мои реквизиты' : `Оплата по смете #${estimateId}`;
-    const subtitle = profileMode
-      ? 'QR без суммы: сумму можно ввести вручную в банковском приложении'
-      : `Оплата по смете #${estimateId}`;
+    const qrMode = data.qr_mode || (data.has_bank_qr ? 'bank' : (data.has_qr ? 'sbp_phone' : 'none'));
+    const isSBPFallback = qrMode === 'sbp_phone';
+    const title = profileMode ? 'РњРѕРё СЂРµРєРІРёР·РёС‚С‹' : `РћРїР»Р°С‚Р° РїРѕ СЃРјРµС‚Рµ #${estimateId}`;
+    let subtitle = profileMode
+      ? 'QR РїРѕРєР° РЅРµ СЃС„РѕСЂРјРёСЂРѕРІР°РЅ'
+      : `РћРїР»Р°С‚Р° РїРѕ СЃРјРµС‚Рµ #${estimateId}`;
+    let qrHint = 'РћС‚СЃРєР°РЅРёСЂСѓР№С‚Рµ QR-РєРѕРґ РІ РїСЂРёР»РѕР¶РµРЅРёРё Р±Р°РЅРєР°';
+
+    if (qrMode === 'bank') {
+      subtitle = profileMode
+        ? 'Р‘Р°РЅРєРѕРІСЃРєРёР№ QR Р±РµР· СЃСѓРјРјС‹: СЃСѓРјРјСѓ РјРѕР¶РЅРѕ РІРІРµСЃС‚Рё РІСЂСѓС‡РЅСѓСЋ РІ Р±Р°РЅРєРѕРІСЃРєРѕРј РїСЂРёР»РѕР¶РµРЅРёРё'
+        : `Р‘Р°РЅРєРѕРІСЃРєРёР№ QR РґР»СЏ РѕРїР»Р°С‚С‹ РїРѕ СЃРјРµС‚Рµ #${estimateId}`;
+    } else if (qrMode === 'sbp_phone') {
+      subtitle = profileMode
+        ? 'Р‘С‹СЃС‚СЂС‹Р№ QR РґР»СЏ РїРµСЂРµРІРѕРґР° РїРѕ РЎР‘Рџ РїРѕ РЅРѕРјРµСЂСѓ С‚РµР»РµС„РѕРЅР°'
+        : `Р‘С‹СЃС‚СЂС‹Р№ РїРµСЂРµРІРѕРґ РїРѕ РЎР‘Рџ РїРѕ СЃРјРµС‚Рµ #${estimateId}`;
+      qrHint = 'Р•СЃР»Рё РїСЂРёР»РѕР¶РµРЅРёРµ Р±Р°РЅРєР° РЅРµ СЂР°СЃРїРѕР·РЅР°С‘С‚ QR, РїРµСЂРµРІРµРґРёС‚Рµ РїРѕ РЅРѕРјРµСЂСѓ С‚РµР»РµС„РѕРЅР° Рё СЃСѓРјРјРµ РЅРёР¶Рµ';
+    }
+
     const amountHtml = data.amount ? `<div class="qr-amount">${money(data.amount)}</div>` : '';
     const missingFields = Array.isArray(data.missing_bank_fields) ? data.missing_bank_fields : [];
 
@@ -1167,35 +1420,44 @@ async function loadQR(estimateId, profileMode = false) {
 
         ${data.qr_image ? `
           <div class="qr-image-wrap">
-            <img src="data:image/png;base64,${data.qr_image}" alt="QR код для оплаты" class="qr-image">
+            <img src="data:image/png;base64,${data.qr_image}" alt="QR РєРѕРґ РґР»СЏ РѕРїР»Р°С‚С‹" class="qr-image">
           </div>
-          <div class="qr-hint">Отсканируйте QR-код в приложении банка</div>
+          <div class="qr-hint">${qrHint}</div>
+        ` : ''}
+
+        ${isSBPFallback && data.fallback_notice ? `
+          <div class="card mt-12">
+            <div class="card-title">Р РµР¶РёРј РѕРїР»Р°С‚С‹</div>
+            <div class="text-muted">${data.fallback_notice}</div>
+          </div>
         ` : ''}
 
         <div class="card mt-12">
           <div class="card-title">${title}</div>
-          ${data.recipient ? payRow('Получатель', data.recipient) : ''}
-          ${data.bank ? payRow('Банк', data.bank) : ''}
-          ${data.account ? payRow('Р/с', data.account, true) : ''}
-          ${data.correspondent_account ? payRow('Корр. счет', data.correspondent_account, true) : ''}
-          ${data.bik ? payRow('БИК', data.bik, true) : ''}
-          ${data.inn ? payRow('ИНН', data.inn, true) : ''}
-          ${data.card ? payRow('Карта', data.card, true) : ''}
-          ${data.sbp_phone ? payRow('СБП (телефон)', data.sbp_phone, true) : ''}
+          ${qrMode === 'bank' ? payRow('Р РµР¶РёРј QR', 'Р‘Р°РЅРєРѕРІСЃРєРёР№ QR') : ''}
+          ${isSBPFallback ? payRow('Р РµР¶РёРј QR', 'РЎР‘Рџ РїРѕ РЅРѕРјРµСЂСѓ С‚РµР»РµС„РѕРЅР°') : ''}
+          ${data.recipient ? payRow('РџРѕР»СѓС‡Р°С‚РµР»СЊ', data.recipient) : ''}
+          ${data.bank ? payRow('Р‘Р°РЅРє', data.bank) : ''}
+          ${data.account ? payRow('Р /СЃ', data.account, true) : ''}
+          ${data.correspondent_account ? payRow('РљРѕСЂСЂ. СЃС‡РµС‚', data.correspondent_account, true) : ''}
+          ${data.bik ? payRow('Р‘РРљ', data.bik, true) : ''}
+          ${data.inn ? payRow('РРќРќ', data.inn, true) : ''}
+          ${data.card ? payRow('РљР°СЂС‚Р°', data.card, true) : ''}
+          ${data.sbp_phone ? payRow('РЎР‘Рџ (С‚РµР»РµС„РѕРЅ)', data.sbp_phone, true) : ''}
         </div>
 
         ${missingFields.length ? `
           <div class="card mt-12">
-            <div class="card-title">Что нужно заполнить для банковского QR</div>
+            <div class="card-title">Р§С‚Рѕ РЅСѓР¶РЅРѕ Р·Р°РїРѕР»РЅРёС‚СЊ РґР»СЏ РїРѕР»РЅРѕС†РµРЅРЅРѕРіРѕ Р±Р°РЅРєРѕРІСЃРєРѕРіРѕ QR</div>
             <div class="text-muted">${missingFields.join(', ')}</div>
           </div>
         ` : ''}
 
         ${data.sbp_phone ? `
           <div class="sbp-section mt-12">
-            <div class="sbp-label">Перевод по СБП</div>
-            <div class="sbp-phone" onclick="copyToClipboard('${data.sbp_phone}')">${data.sbp_phone} <span class="copy-icon">📋</span></div>
-            <div class="sbp-hint">Нажмите, чтобы скопировать номер</div>
+            <div class="sbp-label">РџРµСЂРµРІРѕРґ РїРѕ РЎР‘Рџ</div>
+            <div class="sbp-phone" onclick="copyToClipboard('${esc(data.sbp_phone)}')">${data.sbp_phone} <span class="copy-icon">рџ“‹</span></div>
+            <div class="sbp-hint">РќР°Р¶РјРёС‚Рµ, С‡С‚РѕР±С‹ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ РЅРѕРјРµСЂ${data.amount ? ' Рё РїРµСЂРµРІРµРґРёС‚Рµ СЃСѓРјРјСѓ РёР· РєР°СЂС‚РѕС‡РєРё РІС‹С€Рµ' : ''}</div>
           </div>
         ` : ''}
       </div>
@@ -1203,9 +1465,9 @@ async function loadQR(estimateId, profileMode = false) {
   } catch (e) {
     container.innerHTML = `
       <div class="empty-state">
-        <p>${e.message || 'Ошибка загрузки QR-кода'}</p>
-        <p class="text-muted">Убедитесь, что заполнены банковские реквизиты мастера</p>
-        <button class="btn btn-primary mt-12" onclick="navigate('profile-edit')">Заполнить реквизиты</button>
+        <p>${e.message || 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё QR-РєРѕРґР°'}</p>
+        <p class="text-muted">РЈР±РµРґРёС‚РµСЃСЊ, С‡С‚Рѕ Р·Р°РїРѕР»РЅРµРЅ С‚РµР»РµС„РѕРЅ РЎР‘Рџ РёР»Рё Р±Р°РЅРєРѕРІСЃРєРёРµ СЂРµРєРІРёР·РёС‚С‹ РјР°СЃС‚РµСЂР°</p>
+        <button class="btn btn-primary mt-12" onclick="navigate('profile-edit')">Р—Р°РїРѕР»РЅРёС‚СЊ СЂРµРєРІРёР·РёС‚С‹</button>
       </div>
     `;
   }
@@ -1217,13 +1479,13 @@ function payRow(label, value, copyable) {
   return `
     <div class="pay-row" ${onclick}>
       <span class="pay-label">${label}</span>
-      <span class="pay-value">${value}${copyable ? ' <span class="copy-icon">📋</span>' : ''}</span>
+      <span class="pay-value">${value}${copyable ? ' <span class="copy-icon">рџ“‹</span>' : ''}</span>
     </div>
   `;
 }
 
 function copyToClipboard(text) {
-  navigator.clipboard.writeText(text).then(() => toast('Скопировано'))
+  navigator.clipboard.writeText(text).then(() => toast('РЎРєРѕРїРёСЂРѕРІР°РЅРѕ'))
     .catch(() => {
       // Fallback for older browsers
       const ta = document.createElement('textarea');
@@ -1232,81 +1494,106 @@ function copyToClipboard(text) {
       ta.select();
       document.execCommand('copy');
       document.body.removeChild(ta);
-      toast('Скопировано');
+      toast('РЎРєРѕРїРёСЂРѕРІР°РЅРѕ');
     });
 }
 
-// ─── Notifications ──────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Notifications в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function showNotifications() {
-  navigate('notifications');
+  navigate('notifications', {page: state.notifications.page || 1, notificationId: null});
 }
 
-async function loadNotifications() {
-  const notifs = await api('GET', '/notifications');
-  const container = document.getElementById('notifications-list');
-
-  if (notifs.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>Нет уведомлений</p></div>';
-    return;
-  }
-
-  const eventIcons = {
-    'discount.requested': '💸', 'discount.approved': '✅', 'discount.rejected': '❌',
-    'estimate.for_review': '📊', 'estimate.approved': '✅',
-    'order.assigned': '👷', 'order.completed': '✅',
-    'payment.received': '💰', 'invite.pending_approval': '📨',
-    'staffing.action': '👥',
-  };
-
-  container.innerHTML = notifs.map(n => {
-    const icon = eventIcons[n.event_type] || '🔔';
-    const isUnread = n.status === 'sent' || n.status === 'pending';
-    const timeStr = n.created_at
-      ? new Date(n.created_at).toLocaleString('ru-RU', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})
-      : '';
-
-    return `
-      <div class="notif-row ${isUnread ? 'unread' : ''}" onclick="openNotification(${n.id}, '${n.entity_type || ''}', ${n.entity_id || 'null'})">
-        <div class="notif-icon">${icon}</div>
-        <div class="notif-body">
-          <div class="notif-title">${n.title}</div>
-          <div class="notif-text">${n.body}</div>
-          <div class="notif-time">${timeStr}</div>
-        </div>
-        ${isUnread ? '<div class="notif-dot"></div>' : ''}
-      </div>
-    `;
-  }).join('');
-
-  // Hide badge
-  document.getElementById('notif-badge').classList.add('hidden');
-}
 
 async function openNotification(notifId, entityType, entityId) {
-  // Mark as read
-  try { await api('POST', `/notifications/${notifId}/read`); } catch(e) { /* ignore */ }
-
-  // Navigate to entity
-  if (entityType === 'estimate' && entityId) {
-    navigate('estimate', {id: entityId});
-  } else if (entityType === 'order' && entityId) {
-    navigate('order', {id: entityId});
-  } else if (entityType === 'discount_request' && entityId) {
-    navigate('approvals');
-  }
+  await openNotificationDetail(notifId);
+  return;
 }
 
-// ─── Helpers ────────────────────────────────────────────────
+
+async function loadNotificationsPage(page) {
+  const nextPage = Math.max(1, Number(page || 1));
+  state.notifications.selectedId = null;
+  await loadNotifications({page: nextPage, notificationId: null});
+}
+
+async function openNotificationDetail(notifId) {
+  const notification = state.notifications.items.find(item => item.id === notifId);
+  if (!notification) return;
+
+  state.notifications.selectedId = notifId;
+  if (state.screen === 'notifications') {
+    state.currentParams = {
+      page: state.notifications.page,
+      notificationId: state.notifications.selectedId,
+    };
+  }
+
+  if (notification.is_unread) {
+    try {
+      await api('POST', `/notifications/${notifId}/read`);
+      notification.is_unread = false;
+      notification.status = 'read';
+      state.notifications.unreadCount = Math.max(0, Number(state.notifications.unreadCount || 0) - 1);
+      setNotificationBadge(state.notifications.unreadCount);
+    } catch (e) {
+      console.warn('Failed to mark notification as read', e);
+    }
+  }
+
+  renderNotifications();
+}
+
+function closeNotificationDetail() {
+  state.notifications.selectedId = null;
+  if (state.screen === 'notifications') {
+    state.currentParams = {
+      page: state.notifications.page,
+      notificationId: null,
+    };
+  }
+  renderNotifications();
+}
+
+function canOpenNotificationTarget(notification) {
+  if (!notification) return false;
+  if (notification.entity_type === 'estimate' && notification.entity_id) return true;
+  if (notification.entity_type === 'order' && notification.entity_id) return true;
+  if (notification.entity_type === 'discount_request' || notification.event_type === 'discount.requested') return true;
+  return false;
+}
+
+function openNotificationTarget() {
+  const notification = state.notifications.items.find(item => item.id === state.notifications.selectedId);
+  if (!notification) return;
+  navigateToNotificationTarget(notification);
+}
+
+
 function money(amount) {
-  return new Intl.NumberFormat('ru-RU').format(amount || 0) + '₽';
+  return new Intl.NumberFormat('ru-RU').format(amount || 0) + 'в‚Ѕ';
+}
+
+function formatPercent(value) {
+  return new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0)) + '%';
 }
 
 function esc(str) {
   return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function complexityLabel(c) {
-  return {basic:'Простая', std:'Стандарт', complex:'Сложная', hard:'Тяжёлая'}[c] || c;
+  return {basic:'РџСЂРѕСЃС‚Р°СЏ', std:'РЎС‚Р°РЅРґР°СЂС‚', complex:'РЎР»РѕР¶РЅР°СЏ', hard:'РўСЏР¶С‘Р»Р°СЏ'}[c] || c;
 }
 
 function itemRow(item) {
@@ -1314,7 +1601,7 @@ function itemRow(item) {
     <div class="item-row" onclick="navigate('item', {id: ${item.id}, title: '${esc(item.name).substring(0,25)}'})">
       <div class="item-info">
         <div class="item-name">${item.name}</div>
-        <div class="item-meta">${item.unit}${item.popular ? ' · ⭐' : ''}</div>
+        <div class="item-meta">${item.unit}${item.popular ? ' В· в­ђ' : ''}</div>
       </div>
       <div class="item-price">${money(item.price)}</div>
       <div class="item-add" onclick="event.stopPropagation(); addToEstimate(${item.id}, '${esc(item.name)}')">+</div>
@@ -1342,5 +1629,258 @@ function updateFAB() {
   }
 }
 
-// ─── Start ──────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђ Start в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+function setNotificationBadge(count) {
+  const badge = document.getElementById('notif-badge');
+  const value = Math.max(0, Number(count || 0));
+  if (value > 0) {
+    badge.textContent = value > 99 ? '99+' : String(value);
+    badge.classList.remove('hidden');
+  } else {
+    badge.textContent = '0';
+    badge.classList.add('hidden');
+  }
+}
+
+function confirmAction(message) {
+  if (tg?.showConfirm) {
+    return new Promise(resolve => tg.showConfirm(message, resolve));
+  }
+  return Promise.resolve(window.confirm(message));
+}
+
+async function loadNotifications(params = {}) {
+  const container = document.getElementById('notifications-list');
+  const requestedPage = Math.max(1, Number(params.page || state.notifications.page || 1));
+  const offset = (requestedPage - 1) * state.notifications.pageSize;
+  const hasExplicitSelection = Object.prototype.hasOwnProperty.call(params, 'notificationId');
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-title">\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u043c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f...</div>
+      <div class="card-subtitle">\u041f\u043e\u0434\u0442\u044f\u0433\u0438\u0432\u0430\u0435\u043c \u0442\u0435\u043a\u0443\u0449\u0443\u044e \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0443 \u0438 \u0438\u0441\u0442\u043e\u0440\u0438\u044e.</div>
+    </div>
+  `;
+
+  try {
+    const raw = await api(
+      'GET',
+      `/notifications?limit=${state.notifications.pageSize + 1}&offset=${offset}`
+    );
+    const items = raw.slice(0, state.notifications.pageSize);
+
+    state.notifications.page = requestedPage;
+    state.notifications.hasMore = raw.length > state.notifications.pageSize;
+    state.notifications.items = items;
+
+    if (hasExplicitSelection) {
+      const nextSelectedId = Number(params.notificationId);
+      state.notifications.selectedId = Number.isFinite(nextSelectedId) && nextSelectedId > 0
+        ? nextSelectedId
+        : null;
+    }
+
+    if (!items.some(item => item.id === state.notifications.selectedId)) {
+      state.notifications.selectedId = null;
+    }
+
+    if (state.screen === 'notifications') {
+      state.currentParams = {
+        page: state.notifications.page,
+        notificationId: state.notifications.selectedId,
+      };
+    }
+
+    renderNotifications();
+  } catch (e) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-title">\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f</div>
+        <div class="card-subtitle">${escapeHtml(e.message || '\u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437')}</div>
+        <button class="btn btn-primary mt-12" onclick="loadNotifications({page: ${requestedPage}, notificationId: null})">
+          \u041e\u0431\u043d\u043e\u0432\u0438\u0442\u044c
+        </button>
+      </div>
+    `;
+    toast(e.message, true);
+  }
+}
+
+function renderNotifications() {
+  const container = document.getElementById('notifications-list');
+  const notification = state.notifications.items.find(item => item.id === state.notifications.selectedId) || null;
+
+  if (state.screen === 'notifications') {
+    state.currentParams = {
+      page: state.notifications.page,
+      notificationId: state.notifications.selectedId,
+    };
+  }
+
+  if (notification) {
+    container.innerHTML = renderNotificationDetail(notification);
+    return;
+  }
+
+  const pageStart = ((state.notifications.page - 1) * state.notifications.pageSize) + 1;
+  const pageEnd = pageStart + Math.max(state.notifications.items.length - 1, 0);
+  const unreadCount = Number(state.notifications.unreadCount || 0);
+
+  if (state.notifications.items.length === 0) {
+    container.innerHTML = `
+      <div class="card notif-summary-card">
+        <div class="notif-summary-top">
+          <div>
+            <div class="card-title">\u0416\u0443\u0440\u043d\u0430\u043b \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439</div>
+            <div class="card-subtitle">\u0417\u0434\u0435\u0441\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442\u0441\u044f \u0432\u0441\u044f \u0438\u0441\u0442\u043e\u0440\u0438\u044f, \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u0440\u043e\u043f\u0430\u0434\u0430\u0435\u0442.</div>
+          </div>
+          <div class="notif-summary-count">${unreadCount}</div>
+        </div>
+      </div>
+      <div class="empty-state card">
+        <p>\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442</p>
+        <p class="text-muted">\u041a\u043e\u0433\u0434\u0430 \u043f\u043e\u044f\u0432\u044f\u0442\u0441\u044f \u0441\u043e\u0431\u044b\u0442\u0438\u044f, \u043e\u043d\u0438 \u043e\u0441\u0442\u0430\u043d\u0443\u0442\u0441\u044f \u0432 \u044d\u0442\u043e\u043c \u0436\u0443\u0440\u043d\u0430\u043b\u0435.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="card notif-summary-card">
+      <div class="notif-summary-top">
+        <div>
+          <div class="card-title">\u0416\u0443\u0440\u043d\u0430\u043b \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439</div>
+          <div class="card-subtitle">
+            \u0417\u0430\u043f\u0438\u0441\u0438 ${pageStart}-${pageEnd}. \u041d\u0435\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0445: ${unreadCount}.
+          </div>
+        </div>
+        <div class="notif-summary-count">${unreadCount}</div>
+      </div>
+      <div class="notif-page-hint">
+        \u0421\u0442\u0440\u0430\u043d\u0438\u0446\u0430 ${state.notifications.page}${state.notifications.hasMore ? ' В· \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b \u0431\u043e\u043b\u0435\u0435 \u0440\u0430\u043d\u043d\u0438\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f' : ''}
+      </div>
+    </div>
+    <div class="notif-list">
+      ${state.notifications.items.map(n => `
+        <div class="notif-row ${n.is_unread ? 'unread' : ''}" onclick="openNotification(${n.id})">
+          <div class="notif-icon">${notificationIcon(n.event_type)}</div>
+          <div class="notif-body">
+            <div class="notif-title">${escapeHtml(n.title || '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435')}</div>
+            <div class="notif-text">${escapeHtml(n.body || '')}</div>
+            <div class="notif-time">${formatNotificationListTime(n.created_at)}</div>
+          </div>
+          ${n.is_unread ? '<div class="notif-dot"></div>' : ''}
+        </div>
+      `).join('')}
+    </div>
+    <div class="pager">
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page - 1})"
+        ${state.notifications.page === 1 ? 'disabled' : ''}
+      >
+        \u2190 \u041d\u043e\u0432\u0435\u0435
+      </button>
+      <div class="pager-label">\u0421\u0442\u0440\u0430\u043d\u0438\u0446\u0430 ${state.notifications.page}</div>
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page + 1})"
+        ${!state.notifications.hasMore ? 'disabled' : ''}
+      >
+        \u0421\u0442\u0430\u0440\u0435\u0435 \u2192
+      </button>
+    </div>
+  `;
+}
+
+function renderNotificationDetail(notification) {
+  const canOpenTarget = canOpenNotificationTarget(notification);
+  const bodyHtml = escapeHtml(notification.body || '').replace(/\n/g, '<br>');
+
+  return `
+    <div class="card notif-detail-card">
+      <div class="notif-detail-meta">
+        <span class="notif-chip ${notification.is_unread ? 'unread' : 'read'}">
+          ${notification.is_unread ? '\u041d\u043e\u0432\u043e\u0435' : '\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u043d\u043e'}
+        </span>
+        <span class="notif-chip">${formatNotificationDetailTime(notification.created_at)}</span>
+        <span class="notif-chip">${escapeHtml(notification.event_type || 'event')}</span>
+      </div>
+      <div class="notif-detail-title">${escapeHtml(notification.title || '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435')}</div>
+      <div class="notif-detail-body">${bodyHtml || '\u0411\u0435\u0437 \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0433\u043e \u0442\u0435\u043a\u0441\u0442\u0430'}</div>
+      ${canOpenTarget ? `
+      <div class="notif-target-box">
+        <div class="notif-target-label">\u0421\u0432\u044f\u0437\u0430\u043d\u043d\u043e\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435</div>
+        <div class="notif-target-value">${escapeHtml(notification.target_label || '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0441\u0432\u044f\u0437\u0430\u043d\u043d\u0443\u044e \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044c')}</div>
+      </div>
+      ` : ''}
+      <div class="notif-detail-actions">
+        ${canOpenTarget ? `
+        <button class="btn btn-primary" onclick="openNotificationTarget()">
+          ${escapeHtml(notification.target_label || '\u041e\u0442\u043a\u0440\u044b\u0442\u044c')}
+        </button>
+        ` : ''}
+        <button class="btn btn-secondary" onclick="closeNotificationDetail()">\u2190 \u041a \u0441\u043f\u0438\u0441\u043a\u0443</button>
+      </div>
+    </div>
+    <div class="pager">
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page - 1})"
+        ${state.notifications.page === 1 ? 'disabled' : ''}
+      >
+        \u2190 \u041d\u043e\u0432\u0435\u0435
+      </button>
+      <div class="pager-label">\u0421\u0442\u0440\u0430\u043d\u0438\u0446\u0430 ${state.notifications.page}</div>
+      <button
+        class="btn btn-secondary btn-sm"
+        onclick="loadNotificationsPage(${state.notifications.page + 1})"
+        ${!state.notifications.hasMore ? 'disabled' : ''}
+      >
+        \u0421\u0442\u0430\u0440\u0435\u0435 \u2192
+      </button>
+    </div>
+  `;
+}
+
+function navigateToNotificationTarget(notification) {
+  if (notification.entity_type === 'estimate' && notification.entity_id) {
+    navigate('estimate', {id: notification.entity_id});
+  } else if (notification.entity_type === 'order' && notification.entity_id) {
+    navigate('order', {id: notification.entity_id});
+  } else if (notification.entity_type === 'discount_request' || notification.event_type === 'discount.requested') {
+    navigate('approvals');
+  } else {
+    toast('\u0414\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u043d\u0435\u0442 \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e\u0433\u043e \u044d\u043a\u0440\u0430\u043d\u0430', true);
+  }
+}
+
+function notificationIcon(eventType) {
+  return {
+    'suggestion.created': '\u{1F4A1}',
+    'discount.requested': '\u{1F4B8}',
+    'discount.approved': '\u2705',
+    'discount.rejected': '\u274C',
+    'estimate.for_review': '\u{1F4CA}',
+    'estimate.approved': '\u2705',
+    'estimate.deleted': '\u{1F5D1}',
+    'order.assigned': '\u{1F477}',
+    'order.completed': '\u2705',
+    'payment.received': '\u{1F4B0}',
+    'invite.pending_approval': '\u{1F4E8}',
+    'staffing.action': '\u{1F465}',
+  }[eventType] || '\u{1F514}';
+}
+
+function formatNotificationDetailTime(value) {
+  if (!value) return '\u0414\u0430\u0442\u0430 \u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u0430';
+  return new Date(value).toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 init();

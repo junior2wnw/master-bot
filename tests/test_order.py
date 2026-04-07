@@ -1,7 +1,14 @@
 """Tests for order service: status transitions, validation."""
 
+from types import SimpleNamespace
+
 import pytest
-from app.services.order import TRANSITIONS
+from app.core.exceptions import ValidationError
+from app.services.order import (
+    TRANSITIONS,
+    get_cancellation_reason_options,
+    normalize_cancellation_reason,
+)
 
 
 class TestOrderTransitions:
@@ -56,3 +63,38 @@ class TestOrderTransitions:
                 earlier = forward_order[j]
                 assert earlier not in TRANSITIONS[status], \
                     f"{status} should not transition back to {earlier}"
+
+
+def _user(user_id: int, roles: list[str]):
+    return SimpleNamespace(
+        id=user_id,
+        roles=[SimpleNamespace(role_code=role) for role in roles],
+    )
+
+
+def _order(master_id: int | None = None, status: str = "assigned"):
+    return SimpleNamespace(master_id=master_id, client_id=5, status=status)
+
+
+def test_master_gets_predefined_cancellation_reasons():
+    reasons = get_cancellation_reason_options(_user(3, ["master"]), _order(master_id=3))
+    assert reasons
+    assert reasons[0]["code"] == "master_health"
+
+
+def test_master_cancellation_reason_is_normalized_from_code():
+    label = normalize_cancellation_reason(
+        _user(3, ["master"]),
+        _order(master_id=3),
+        "missing_tools_or_parts",
+    )
+    assert "инструмента" in label
+
+
+def test_master_cannot_cancel_with_arbitrary_reason():
+    with pytest.raises(ValidationError):
+        normalize_cancellation_reason(
+            _user(3, ["master"]),
+            _order(master_id=3),
+            "Неудобный клиент",
+        )

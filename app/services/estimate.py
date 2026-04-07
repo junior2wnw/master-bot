@@ -258,6 +258,83 @@ async def update_estimate_status(
     return estimate
 
 
+async def delete_estimate(
+    session: AsyncSession,
+    *,
+    estimate_id: int,
+    user_id: int,
+) -> None:
+    """Delete a draft estimate together with all of its versions and line items."""
+    actor = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if not actor:
+        raise PermissionDenied("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ")
+
+    estimate = (
+        await session.execute(select(Estimate).where(Estimate.id == estimate_id))
+    ).scalar_one_or_none()
+    if not estimate:
+        raise NotFoundError("РЎРјРµС‚Р°")
+
+    if not can_edit_estimate(actor, estimate):
+        raise PermissionDenied("РЈРґР°Р»СЏС‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ СЃРІРѕСЋ СЃРјРµС‚Сѓ-С‡РµСЂРЅРѕРІРёРє")
+    if estimate.order_id:
+        raise PermissionDenied("РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ СЃРјРµС‚Сѓ, РєРѕС‚РѕСЂР°СЏ СѓР¶Рµ РїСЂРёРІСЏР·Р°РЅР° Рє Р·Р°РєР°Р·Сѓ")
+
+    versions = (
+        await session.execute(
+            select(EstimateVersion).where(EstimateVersion.estimate_id == estimate_id)
+        )
+    ).scalars().all()
+    version_ids = [version.id for version in versions]
+
+    await log_audit(
+        session,
+        user_id=user_id,
+        action="estimate.deleted",
+        entity_type="estimate",
+        entity_id=estimate_id,
+        old_value={
+            "status": estimate.status,
+            "order_id": estimate.order_id,
+            "versions": len(version_ids),
+        },
+    )
+
+    if version_ids:
+        discounts = (
+            await session.execute(
+                select(EstimateDiscount).where(EstimateDiscount.version_id.in_(version_ids))
+            )
+        ).scalars().all()
+        for discount in discounts:
+            await session.delete(discount)
+
+        line_items = (
+            await session.execute(
+                select(EstimateLineItem).where(EstimateLineItem.version_id.in_(version_ids))
+            )
+        ).scalars().all()
+        for item in line_items:
+            await session.delete(item)
+
+        await session.flush()
+
+        for version in versions:
+            await session.delete(version)
+
+    await session.flush()
+    await session.delete(estimate)
+    await session.flush()
+
+    await event_bus.publish(Event(
+        type="estimate.deleted",
+        payload={"estimate_id": estimate_id},
+        actor_id=user_id,
+    ))
+
+
 async def get_version_diff(
     session: AsyncSession,
     estimate_id: int,

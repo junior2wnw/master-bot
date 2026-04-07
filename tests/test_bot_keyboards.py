@@ -29,6 +29,15 @@ def test_estimate_actions_include_position_editor_for_draft_master():
     assert "est_items:12:1" in callbacks
 
 
+def test_estimate_actions_include_delete_for_editable_draft():
+    markup = keyboards.estimate_actions(estimate_id=12, is_master=True, status="draft")
+    texts = _texts(markup)
+    callbacks = _callbacks(markup)
+
+    assert "\u274c \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u043c\u0435\u0442\u0443" in texts
+    assert "est_delete_prompt:12" in callbacks
+
+
 def test_estimate_items_list_links_to_item_editor():
     markup = keyboards.estimate_items_list(
         estimate_id=17,
@@ -81,6 +90,8 @@ def test_main_menu_master_gets_orders_from_permission_matrix():
 
     assert "📝 Заказы (2)" in texts
     assert "my_orders" in callbacks
+    assert "💡 Предложения" in texts
+    assert "project_suggestion" in callbacks
 
 
 def test_main_menu_owner_gets_admin_and_owner_sections():
@@ -95,6 +106,8 @@ def test_main_menu_owner_gets_admin_and_owner_sections():
     assert "📈 Мониторинг" in texts
     assert "admin_panel" in callbacks
     assert "owner_panel" in callbacks
+    assert "💡 Предложения" in texts
+    assert "project_suggestion" in callbacks
 
 
 def test_profile_actions_owner_inherits_master_admin_and_owner_sections():
@@ -115,11 +128,28 @@ def test_profile_actions_owner_inherits_master_admin_and_owner_sections():
     assert "profile_requisites" in callbacks
     assert "profile_role_mode" in callbacks
     assert "owner_panel" in callbacks
+    assert "💡 Предложения" in texts
+    assert "project_suggestion" in callbacks
 
 
 def test_order_list_hides_create_button_without_permission():
     markup = keyboards.order_list([{"id": 10, "status": "draft", "address": "Тест"}], can_create=False)
     assert "➕ Новый заказ" not in _texts(markup)
+
+
+def test_order_cancel_reason_keyboard_contains_reason_callbacks():
+    markup = keyboards.order_cancel_reasons(
+        18,
+        [
+            {"code": "master_health", "label": "Мастер не может выйти по состоянию здоровья"},
+            {"code": "missing_tools_or_parts", "label": "Нет нужного инструмента или запчастей"},
+        ],
+    )
+
+    callbacks = _callbacks(markup)
+    assert "order_cancel_reason:18:master_health" in callbacks
+    assert "order_cancel_reason:18:missing_tools_or_parts" in callbacks
+    assert "order_view:18" in callbacks
 
 
 def test_catalog_buttons_truncate_long_titles():

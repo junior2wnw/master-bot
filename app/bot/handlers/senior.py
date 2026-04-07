@@ -317,10 +317,13 @@ async def cb_approvals(callback: CallbackQuery, session: AsyncSession) -> None:
     kb = InlineKeyboardBuilder()
 
     for request in pending:
-        suffix = "%" if request.discount_type == "percent" else "₽"
+        discount_label = (
+            f"{float(request.discount_value):g}%"
+            if request.discount_type == "percent"
+            else money(request.discount_value)
+        )
         text_parts.append(
-            f"• Смета #{request.estimate_id}: <b>{request.discount_value}{suffix}</b>\n"
-            f"  Причина: {request.reason}"
+            f"• Смета #{request.estimate_id}: <b>{discount_label}</b>"
         )
         kb.row(InlineKeyboardButton(
             text=f"💸 Запрос #{request.id}",
@@ -357,7 +360,6 @@ async def cb_discount_detail(callback: CallbackQuery, session: AsyncSession) -> 
         "master_name": master.display_name if master else f"ID:{request.requested_by}",
         "type": request.discount_type,
         "value": float(request.discount_value),
-        "reason": request.reason,
     }
     await callback.message.edit_text(
         messages.discount_request_info(payload),

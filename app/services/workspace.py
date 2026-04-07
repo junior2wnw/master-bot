@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -32,6 +32,8 @@ from app.models.payment import Payment
 from app.models.staffing import StaffingAction
 from app.models.user import User
 from app.services.discount import count_pending_for_approver, get_pending_for_approver
+
+UNREAD_NOTIFICATION_STATUSES = ("pending", "sent", "failed")
 
 
 async def _get_staff_moderation_counts(session: AsyncSession) -> tuple[int, int]:
@@ -94,10 +96,37 @@ def serialize_notification(notification: Notification) -> dict:
         "entity_type": notification.entity_type,
         "entity_id": notification.entity_id,
         "created_at": notification.created_at.isoformat() if notification.created_at else None,
-        "is_unread": notification.status in {"pending", "sent", "failed"},
+        "is_unread": notification.status in UNREAD_NOTIFICATION_STATUSES,
         "target_callback": callback,
         "target_label": target_label,
     }
+
+
+async def count_notifications_for_user(
+    session: AsyncSession,
+    *,
+    user_id: int,
+) -> int:
+    return (
+        await session.execute(
+            select(func.count(Notification.id)).where(Notification.user_id == user_id)
+        )
+    ).scalar() or 0
+
+
+async def count_unread_notifications_for_user(
+    session: AsyncSession,
+    *,
+    user_id: int,
+) -> int:
+    return (
+        await session.execute(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == user_id,
+                Notification.status.in_(UNREAD_NOTIFICATION_STATUSES),
+            )
+        )
+    ).scalar() or 0
 
 
 async def list_notifications_for_user(
@@ -105,21 +134,25 @@ async def list_notifications_for_user(
     *,
     user_id: int,
     limit: int = 20,
+    offset: int = 0,
+    unread_first: bool = False,
 ) -> list[Notification]:
+    query = select(Notification).where(Notification.user_id == user_id)
+    if unread_first:
+        query = query.order_by(
+            case(
+                (Notification.status.in_(UNREAD_NOTIFICATION_STATUSES), 0),
+                else_=1,
+            ),
+            Notification.created_at.desc(),
+            Notification.id.desc(),
+        )
+    else:
+        query = query.order_by(Notification.created_at.desc(), Notification.id.desc())
     result = await session.execute(
-        select(Notification)
-        .where(Notification.user_id == user_id)
-        .order_by(Notification.created_at.desc())
-        .limit(limit)
+        query.offset(max(offset, 0)).limit(limit)
     )
-    notifications = list(result.scalars().all())
-    notifications.sort(
-        key=lambda item: (
-            0 if item.status in {"pending", "sent", "failed"} else 1,
-            -(item.id or 0),
-        ),
-    )
-    return notifications
+    return list(result.scalars().all())
 
 
 async def mark_notification_read(
@@ -191,14 +224,7 @@ async def get_pending_counts(session: AsyncSession, user: User) -> dict:
         if pending_approvals:
             counts["pending_approvals"] = pending_approvals
 
-    unread_notifications = (
-        await session.execute(
-            select(func.count(Notification.id)).where(
-                Notification.user_id == user.id,
-                Notification.status.in_(["pending", "sent", "failed"]),
-            )
-        )
-    ).scalar() or 0
+    unread_notifications = await count_unread_notifications_for_user(session, user_id=user.id)
     if unread_notifications:
         counts["unread_notifications"] = unread_notifications
 
@@ -260,11 +286,19 @@ async def get_action_items(
 
     if has_permission(user, Permission.DISCOUNT_APPROVE_BRANCH):
         for request in await get_pending_for_approver(session, user, limit=4):
-            suffix = "%" if request.discount_type == "percent" else "₽"
+            discount_label = (
+                f"{float(request.discount_value):g}%"
+                if request.discount_type == "percent"
+                else f"{int(round(float(request.discount_value))):,}₽".replace(",", " ")
+            )
             items.append({
                 "icon": "💸",
-                "title": f"Согласовать скидку {request.discount_value}{suffix}",
-                "body": f"Смета #{request.estimate_id}. Причина: {request.reason or 'не указана'}",
+                "title": f"Согласовать скидку {discount_label}",
+                "body": (
+                    f"Смета #{request.estimate_id}. Мастер запросил изменение скидки."
+                    if request.discount_type == "percent"
+                    else f"Смета #{request.estimate_id}. В очереди старый запрос на фиксированную скидку."
+                ),
                 "callback": f"disc_detail:{request.id}",
             })
 
@@ -289,8 +323,13 @@ async def get_action_items(
                 "callback": "adm_staffing",
             })
 
-    notifications = await list_notifications_for_user(session, user_id=user.id, limit=6)
-    unread = [notification for notification in notifications if notification.status in {"pending", "sent", "failed"}]
+    notifications = await list_notifications_for_user(
+        session,
+        user_id=user.id,
+        limit=6,
+        unread_first=True,
+    )
+    unread = [notification for notification in notifications if notification.status in UNREAD_NOTIFICATION_STATUSES]
     for notification in unread[:2]:
         items.append({
             "icon": "🔔",

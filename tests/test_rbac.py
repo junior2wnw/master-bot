@@ -6,7 +6,7 @@ import pytest
 
 from app.core.security import (
     Permission, Role, can_assign_order, can_create_order_from_estimate, can_manage_user,
-    effective_role_codes, get_active_role_code, get_active_role_label, get_available_role_codes,
+    effective_role_codes, estimate_action_capabilities, get_active_role_code, get_active_role_label, get_available_role_codes,
     get_effective_role_codes, get_permissions, get_max_role_label, has_permission,
     has_permission_for_roles, has_role, has_role_switch_access, highest_role_code,
     highest_role_label, is_role_switch_overridden, require_permission, role_codes_with_inheritance,
@@ -144,6 +144,13 @@ class TestAccessCapabilities:
 
         assert can_assign_order(admin, submitted, master_id=admin.id)
         assert not can_assign_order(admin, completed, master_id=admin.id)
+
+    def test_master_draft_capabilities_include_delete(self, master):
+        estimate = SimpleNamespace(status="draft", client_id=5, master_id=master.id)
+        capabilities = estimate_action_capabilities(master, estimate)
+
+        assert capabilities["can_edit"] is True
+        assert capabilities["can_delete"] is True
 
     def test_create_order_from_estimate_requires_client_and_approved_status(self, client, admin):
         approved_for_client = SimpleNamespace(status="approved", client_id=client.id, master_id=4)

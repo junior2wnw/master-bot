@@ -264,6 +264,19 @@ def estimate_sent_to_client(estimate_id: int, client_name: str) -> str:
     )
 
 
+def estimate_delete_confirmation(estimate: dict) -> str:
+    items_count = len(estimate.get("items", []))
+    estimate_id = estimate.get("id", "")
+    return (
+        f"{header('❌', f'Удалить смету #{estimate_id}')}\n"
+        f"{THIN_LINE}\n"
+        f"Позиций: <b>{items_count}</b>\n"
+        f"Итого: <b>{money(estimate.get('final', 0))}</b>\n\n"
+        "Смета-черновик будет удалена полностью. "
+        "Вернуть её после удаления нельзя."
+    )
+
+
 def estimate_for_review(estimate: dict) -> str:
     text = (
         f"📩 <b>Новая смета на согласование</b>\n"
@@ -403,7 +416,7 @@ def commission_report(data: dict) -> str:
 # DISCOUNTS
 # ═══════════════════════════════════════════════════════════════
 
-def discount_request_info(dr: dict) -> str:
+def _legacy_discount_request_info_unused(dr: dict) -> str:
     type_label = "%" if dr["type"] == "percent" else "₽"
     return (
         f"{header('💸', 'Запрос на скидку')}\n"
@@ -415,7 +428,7 @@ def discount_request_info(dr: dict) -> str:
     )
 
 
-def discount_request_prompt() -> str:
+def _legacy_discount_request_prompt_unused() -> str:
     return (
         f"{header('💸', 'Запрос на скидку')}\n\n"
         "Введите в формате:\n"
@@ -607,3 +620,36 @@ def voice_processing() -> str:
 
 def action_needed(title: str, body: str) -> str:
     return f"🔔 <b>{title}</b>\n{THIN_LINE}\n{body}"
+
+
+def discount_request_info(dr: dict) -> str:
+    discount_value = (
+        f"{dr['value']}%"
+        if dr.get("type", "percent") == "percent"
+        else money(dr["value"])
+    )
+    return (
+        f"{header('💸', 'Запрос на скидку')}\n"
+        f"{THIN_LINE}\n"
+        f"Смета: #{dr['estimate_id']}\n"
+        f"Мастер: {dr['master_name']}\n"
+        f"Скидка: <b>{discount_value}</b>\n"
+    )
+
+
+def discount_request_prompt() -> str:
+    return (
+        f"{header('💸', 'Запрос на скидку')}\n\n"
+        "Введите только процент скидки.\n"
+        "Причина не требуется.\n\n"
+        "Примеры: <code>10</code>, <code>12.5</code>, <code>15%</code>\n"
+        "Максимум: <b>50%</b>"
+    )
+
+
+def order_cancel_reason_prompt() -> str:
+    return (
+        f"{header('❌', 'Отмена заказа')}\n\n"
+        "Выберите причину отмены со стороны мастера.\n"
+        "Причины связаны только с обстоятельствами, не зависящими от клиента."
+    )

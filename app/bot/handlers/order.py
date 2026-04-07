@@ -25,7 +25,8 @@ from app.models.order import Order
 from app.services.auth import get_user_by_telegram_id
 from app.services.order import (
     assign_master, cancel_order, complete_order, create_order,
-    get_orders_for_user, submit_order, transition_order,
+    get_cancellation_reason_options, get_orders_for_user,
+    submit_order, transition_order,
 )
 
 logger = logging.getLogger(__name__)
@@ -338,8 +339,31 @@ async def cb_complete_order(callback: CallbackQuery, session: AsyncSession) -> N
 
 
 @router.callback_query(F.data.startswith("order_cancel:"))
-async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_cancel_order(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
     order_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    result = await session.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not user or not order:
+        await callback.answer("Заказ не найден", show_alert=True)
+        return
+    if not order_action_capabilities(user, order).get("can_cancel"):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    reason_options = get_cancellation_reason_options(user, order)
+    if reason_options:
+        await callback.message.edit_text(
+            messages.order_cancel_reason_prompt(),
+            reply_markup=keyboards.order_cancel_reasons(order_id, reason_options),
+        )
+        await callback.answer()
+        return
+
     await state.update_data(cancel_order_id=order_id)
     await state.set_state(OrderStates.cancel_reason)
 
@@ -351,6 +375,22 @@ async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
         reply_markup=kb.as_markup(),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("order_cancel_reason:"))
+async def cb_cancel_order_with_reason(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, order_id_str, reason_code = callback.data.split(":", 3)
+    order_id = int(order_id_str)
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        return
+
+    try:
+        await cancel_order(session, order_id=order_id, user_id=user.id, reason=reason_code)
+        await callback.answer("❌ Заказ отменён", show_alert=True)
+        await _render_order_view(callback.message, session, user, order_id)
+    except Exception as e:
+        await callback.answer(f"⚠️ {e}", show_alert=True)
 
 
 @router.message(OrderStates.cancel_reason)

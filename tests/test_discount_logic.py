@@ -3,9 +3,16 @@
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
+from app.api.v1 import DiscountRequestBody
 from app.core.exceptions import PermissionDenied, ValidationError
-from app.services.discount import _calculate_discount_amount, _check_can_approve, can_access_discount_request
+from app.services.discount import (
+    _calculate_discount_amount,
+    _check_can_approve,
+    can_access_discount_request,
+    normalize_discount_request_input,
+)
 
 
 class FakeRole:
@@ -31,6 +38,35 @@ def test_percent_discount_is_capped_by_base_amount():
 def test_fixed_discount_is_capped_by_base_amount():
     assert _calculate_discount_amount(1000, "fixed", 300) == 300
     assert _calculate_discount_amount(1000, "fixed", 5000) == 1000
+
+
+def test_only_percent_discount_requests_are_allowed():
+    with pytest.raises(ValidationError):
+        normalize_discount_request_input(
+            discount_type="fixed",
+            discount_value=500,
+            scope="estimate",
+        )
+
+
+def test_percent_discount_request_is_normalized():
+    discount_type, discount_value, scope = normalize_discount_request_input(
+        discount_type="percent",
+        discount_value=12.5,
+        scope="estimate",
+    )
+    assert discount_type == "percent"
+    assert discount_value == 12.5
+    assert scope == "estimate"
+
+
+def test_api_discount_request_body_exposes_only_percentage_value():
+    assert set(DiscountRequestBody.model_fields) == {"value"}
+
+
+def test_api_discount_request_body_rejects_out_of_range_percentage():
+    with pytest.raises(PydanticValidationError):
+        DiscountRequestBody(value=55)
 
 
 def test_assigned_senior_master_can_approve():

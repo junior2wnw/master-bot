@@ -418,6 +418,7 @@ def estimate_action_capabilities(user: "User", estimate: "Estimate") -> dict[str
     return {
         "can_view": can_view,
         "can_edit": can_edit,
+        "can_delete": can_edit,
         "can_request_discount": can_request_discount_for_estimate(user, estimate),
         "can_send_to_client": can_send_estimate_to_client(user, estimate),
         "can_client_respond": can_respond,

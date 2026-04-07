@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -499,6 +499,25 @@ async def delete_estimate_item(
     return {"ok": True}
 
 
+@router.delete("/estimates/{estimate_id}")
+async def delete_estimate_api(
+    estimate_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.core.exceptions import NotFoundError, PermissionDenied
+    from app.services.estimate import delete_estimate
+
+    try:
+        await delete_estimate(session, estimate_id=estimate_id, user_id=user.id)
+    except NotFoundError as exc:
+        raise HTTPException(404, exc.message) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(403, exc.message) from exc
+
+    return {"ok": True}
+
+
 class EstimateStatusRequest(BaseModel):
     status: str
     client_telegram_id: int | None = None
@@ -548,9 +567,7 @@ async def update_estimate_status_api(
 
 
 class DiscountRequestBody(BaseModel):
-    discount_type: str  # percent | fixed
-    value: float
-    reason: str
+    value: float = Field(gt=0, le=50)
 
 
 @router.post("/estimates/{estimate_id}/discount")
@@ -569,9 +586,8 @@ async def request_discount(
         session,
         estimate_id=estimate_id,
         requested_by=user,
-        discount_type=body.discount_type,
+        discount_type="percent",
         discount_value=body.value,
-        reason=body.reason,
     )
 
     return {"id": dr.id, "status": dr.status}
@@ -631,6 +647,8 @@ async def get_order(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
+    from app.services.order import get_cancellation_reason_options
+
     order = await _require_order_view(session, order_id, user)
 
     # Estimate info
@@ -679,15 +697,21 @@ async def get_order(
         "address": order.address,
         "urgency": order.urgency,
         "notes": order.notes,
+        "cancellation_reason": order.cancellation_reason,
         "client_name": order.client.display_name if order.client else None,
         "master_name": order.master.display_name if order.master else None,
         "estimate": estimate_data,
         "payment_status": payment.status if payment else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "capabilities": order_action_capabilities(user, order),
+        "cancel_reasons": get_cancellation_reason_options(user, order),
         "history": [
-            {"from": h.from_status, "to": h.to_status,
-             "at": h.created_at.isoformat() if h.created_at else None}
+            {
+                "from": h.from_status,
+                "to": h.to_status,
+                "reason": h.reason,
+                "at": h.created_at.isoformat() if h.created_at else None,
+            }
             for h in history
         ],
     }
@@ -777,8 +801,14 @@ async def list_notifications(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
     limit: int = Query(default=30, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
-    notifications = await list_notifications_for_user(session, user_id=user.id, limit=limit)
+    notifications = await list_notifications_for_user(
+        session,
+        user_id=user.id,
+        limit=limit,
+        offset=offset,
+    )
     return [serialize_notification(item) for item in notifications]
 
 
@@ -796,6 +826,31 @@ async def mark_notification_read(
     if not notification:
         raise HTTPException(404, "Notification not found")
     return {"ok": True}
+
+
+class ProjectSuggestionBody(BaseModel):
+    message: str = Field(min_length=10, max_length=1500)
+
+
+@router.post("/suggestions")
+async def create_project_suggestion_api(
+    body: ProjectSuggestionBody,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.services.suggestion import create_project_suggestion
+
+    suggestion, recipient_count = await create_project_suggestion(
+        session,
+        author=user,
+        message=body.message,
+        source="webapp",
+    )
+    return {
+        "id": suggestion.id,
+        "status": suggestion.status,
+        "recipient_count": recipient_count,
+    }
 
 
 # ─── Dashboard ───────────────────────────────────────────────
@@ -863,7 +918,6 @@ async def list_approvals(
             "estimate_id": dr.estimate_id,
             "type": dr.discount_type,
             "value": float(dr.discount_value),
-            "reason": dr.reason,
             "status": dr.status,
             "created_at": dr.created_at.isoformat() if dr.created_at else None,
         }
@@ -1107,16 +1161,6 @@ async def _get_export_data(session, estimate_id: int, user):
                 .order_by(EstimateLineItem.sort_order)
             )).scalars().all()
 
-    # Discount reason
-    discount_reason = ""
-    if ver:
-        from app.models.estimate import EstimateDiscount
-        discounts = (await session.execute(
-            select(EstimateDiscount).where(EstimateDiscount.version_id == ver.id)
-        )).scalars().all()
-        if discounts:
-            discount_reason = discounts[0].reason or ""
-
     # Client name
     client_name = ""
     if estimate.client_id:
@@ -1145,7 +1189,6 @@ async def _get_export_data(session, estimate_id: int, user):
         total=ver.total_amount if ver else 0,
         discount=ver.discount_amount if ver else 0,
         final=ver.final_amount if ver else 0,
-        discount_reason=discount_reason,
         note=estimate.note or "",
         client_name=client_name,
     )
@@ -1207,14 +1250,17 @@ async def get_estimate_qr(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    """Generate payment QR from master's bank details for an estimate."""
+    """Generate payment QR from master's payment details for an estimate."""
     from app.services.estimate_export import generate_payment_qr
 
     export_est, export_profile = await _get_export_data(session, estimate_id, user)
     qr_payload = generate_payment_qr(export_profile, export_est.final, estimate_id)
-    if not qr_payload["has_bank_qr"]:
+    if qr_payload["qr_mode"] == "none":
         missing = ", ".join(qr_payload["missing_bank_fields"])
-        raise HTTPException(400, f"Для банковского QR заполните: {missing}")
+        detail = "Заполните телефон СБП в профиле или полный набор банковских реквизитов"
+        if missing:
+            detail = f"{detail}. Для банковского QR не хватает: {missing}"
+        raise HTTPException(400, detail)
     return qr_payload
 
 

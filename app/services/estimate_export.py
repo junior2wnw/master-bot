@@ -1,24 +1,28 @@
-"""Estimate export to PDF and XLSX with QR code for payment.
+"""Estimate export to PDF and XLSX with payment QR support.
 
 Generates professional-looking Russian-standard documents with:
 - Master's personal data header
 - Line items table with totals
 - Discount breakdown
-- QR code (ST-00012 banking standard) from master's bank details
+- Payment QR from full bank requisites
+- SBP-by-phone fallback when full bank requisites are not available
 - Footer with payment instructions and contacts
 """
 
 import io
 import logging
 from dataclasses import dataclass
-from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 QR_FORMAT_PREFIX = "ST00011"
+SBP_FALLBACK_QR_FORMAT_PREFIX = "ST00012"
 QR_CHARSET = "cp1251"
+QR_MODE_BANK = "bank"
+QR_MODE_SBP_PHONE = "sbp_phone"
+QR_MODE_NONE = "none"
 QR_REQUIRED_BANK_FIELDS: tuple[tuple[str, str], ...] = (
     ("payment_recipient", "Получатель"),
     ("settlement_account", "Расчетный счет"),
@@ -88,7 +92,6 @@ class ExportEstimate:
     total: int
     discount: int
     final: int
-    discount_reason: str = ""
     note: str = ""
     client_name: str = ""
 
@@ -115,6 +118,14 @@ def get_missing_bank_qr_fields(profile: ExportProfile) -> list[str]:
 
 def has_bank_qr_details(profile: ExportProfile) -> bool:
     return not get_missing_bank_qr_fields(profile)
+
+
+def _get_sbp_phone_for_qr(profile: ExportProfile) -> str:
+    return _clean_qr_value(profile.sbp_phone or profile.phone, digits_only=True, max_len=15)
+
+
+def has_sbp_phone_qr_details(profile: ExportProfile) -> bool:
+    return bool(_get_sbp_phone_for_qr(profile))
 
 
 def _build_qr_payload(
@@ -151,13 +162,46 @@ def _build_qr_payload(
     return "|".join(parts)
 
 
-def _build_sbp_qr_payload(profile: ExportProfile, amount: int, estimate_id: int) -> str:
-    """Build simplified QR for SBP (СБП) phone transfer."""
-    phone = profile.sbp_phone or profile.phone
+def _build_sbp_qr_payload(
+    profile: ExportProfile,
+    amount: int | None = None,
+    *,
+    purpose: str | None = None,
+) -> str:
+    """Build a compatibility QR payload for SBP transfer by phone number."""
+    phone = _get_sbp_phone_for_qr(profile)
     if not phone:
         return ""
-    # Simplified: just put phone + amount in text for SBP-compatible apps
-    return f"ST00012|Name={profile.payment_recipient or profile.full_name}|PersonalAcc={phone}|Sum={amount}00|Purpose=Смета #{estimate_id}"
+
+    recipient = _clean_qr_value(profile.payment_recipient or profile.full_name, max_len=160)
+    clean_purpose = _clean_qr_value(purpose, max_len=210)
+    parts = [
+        SBP_FALLBACK_QR_FORMAT_PREFIX,
+        f"Name={recipient or phone}",
+        f"PersonalAcc={phone}",
+    ]
+    if amount is not None:
+        parts.append(f"Sum={int(amount) * 100}")
+    if clean_purpose:
+        parts.append(f"Purpose={clean_purpose}")
+    return "|".join(parts)
+
+
+def _resolve_payment_qr_payload(
+    profile: ExportProfile,
+    amount: int | None = None,
+    *,
+    purpose: str | None = None,
+) -> tuple[str, str]:
+    bank_payload = _build_qr_payload(profile, amount=amount, purpose=purpose)
+    if bank_payload:
+        return bank_payload, QR_MODE_BANK
+
+    sbp_payload = _build_sbp_qr_payload(profile, amount=amount, purpose=purpose)
+    if sbp_payload:
+        return sbp_payload, QR_MODE_SBP_PHONE
+
+    return "", QR_MODE_NONE
 
 
 def _generate_qr_image(data: str, size: int = 180) -> bytes | None:
@@ -227,7 +271,12 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import (
-        Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+        Image,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
     )
 
     buf = io.BytesIO()
@@ -360,8 +409,7 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     totals_data = []
     totals_data.append(["", "Итого:", _money(estimate.total) + " ₽"])
     if estimate.discount > 0:
-        discount_text = f"Скидка ({estimate.discount_reason}):" if estimate.discount_reason else "Скидка:"
-        totals_data.append(["", discount_text, f"−{_money(estimate.discount)} ₽"])
+        totals_data.append(["", "Скидка:", f"−{_money(estimate.discount)} ₽"])
     totals_data.append(["", "К ОПЛАТЕ:", _money(estimate.final) + " ₽"])
 
     totals_table = Table(totals_data, colWidths=[100 * mm, 40 * mm, 30 * mm])
@@ -381,15 +429,15 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     elements.append(totals_table)
 
     # ─── QR code + payment details ───
-    qr_payload = _build_qr_payload(
+    qr_payload, qr_mode = _resolve_payment_qr_payload(
         profile,
         amount=estimate.final,
         purpose=f"Оплата по смете #{estimate.estimate_id}",
     )
     qr_image_bytes = _generate_qr_image(qr_payload)
-    has_bank_details = bool(profile.bank_name or profile.sbp_phone or profile.card_number)
+    has_payment_details = bool(profile.bank_name or profile.sbp_phone or profile.phone or profile.card_number)
 
-    if has_bank_details:
+    if has_payment_details:
         elements.append(Spacer(1, 6 * mm))
         elements.append(Paragraph(
             "<b>РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ</b>",
@@ -400,6 +448,8 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
 
         # Build payment info text
         pay_lines = []
+        if qr_mode == QR_MODE_SBP_PHONE:
+            pay_lines.append("<b>Режим QR:</b> СБП по номеру телефона (быстрый fallback)")
         if profile.payment_recipient:
             pay_lines.append(f"<b>Получатель:</b> {profile.payment_recipient}")
         if profile.bank_name:
@@ -414,8 +464,8 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
             pay_lines.append(f"<b>ИНН:</b> {profile.inn}")
         if profile.card_number:
             pay_lines.append(f"<b>Карта:</b> {profile.card_number}")
-        if profile.sbp_phone:
-            pay_lines.append(f"<b>СБП (телефон):</b> {profile.sbp_phone}")
+        if profile.sbp_phone or profile.phone:
+            pay_lines.append(f"<b>СБП (телефон):</b> {profile.sbp_phone or profile.phone}")
 
         pay_text = Paragraph("<br/>".join(pay_lines), style_header)
 
@@ -450,6 +500,14 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
         footer_lines.append(
             f"* Оплата через СБП: переведите {_money(estimate.final)} ₽ на номер {profile.sbp_phone} ({profile.bank_name or 'банк мастера'})."
         )
+    elif profile.phone:
+        footer_lines.append(
+            f"* Оплата через СБП: переведите {_money(estimate.final)} ₽ на номер {profile.phone}."
+        )
+    if qr_mode == QR_MODE_SBP_PHONE:
+        footer_lines.append(
+            "* QR сформирован в режиме СБП по номеру телефона. Если приложение банка не распознаёт QR, используйте номер и сумму вручную."
+        )
     for line in footer_lines:
         elements.append(Paragraph(line, style_footer))
 
@@ -464,7 +522,6 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     """Generate professional XLSX estimate document."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
 
     wb = Workbook()
     ws = wb.active
@@ -598,12 +655,19 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     row += 2
 
     # ─── Bank details ───
-    has_bank = bool(profile.bank_name or profile.sbp_phone or profile.card_number)
-    if has_bank:
+    has_payment_details = bool(profile.bank_name or profile.sbp_phone or profile.phone or profile.card_number)
+    qr_payload, qr_mode = _resolve_payment_qr_payload(
+        profile,
+        amount=estimate.final,
+        purpose=f"Оплата по смете #{estimate.estimate_id}",
+    )
+    if has_payment_details:
         ws.merge_cells(f"A{row}:G{row}")
         ws[f"A{row}"] = "РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ"
         ws[f"A{row}"].font = Font(name="Arial", size=10, bold=True, color="2B5797")
         row += 1
+        if qr_mode == QR_MODE_SBP_PHONE:
+            add_field("Режим QR:", "СБП по номеру телефона (быстрый fallback)")
         add_field("Получатель:", profile.payment_recipient)
         add_field("Банк:", profile.bank_name)
         add_field("Р/с:", profile.settlement_account)
@@ -611,17 +675,12 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
         add_field("БИК:", profile.bik)
         add_field("ИНН:", profile.inn)
         add_field("Карта:", profile.card_number)
-        add_field("СБП (телефон):", profile.sbp_phone)
+        add_field("СБП (телефон):", profile.sbp_phone or profile.phone)
         row += 1
 
     # ─── QR code image ───
-    qr_payload = _build_qr_payload(
-        profile,
-        amount=estimate.final,
-        purpose=f"Оплата по смете #{estimate.estimate_id}",
-    )
     qr_bytes = _generate_qr_image(qr_payload, size=200)
-    if qr_bytes and has_bank:
+    if qr_bytes and has_payment_details:
         from openpyxl.drawing.image import Image as XlImage
         qr_img = XlImage(io.BytesIO(qr_bytes))
         qr_img.width = 150
@@ -641,6 +700,11 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     ws.merge_cells(f"A{row}:G{row}")
     ws[f"A{row}"] = "* Гарантия на выполненные работы — по договорённости с мастером."
     ws[f"A{row}"].font = Font(name="Arial", size=7, color="999999")
+    if qr_mode == QR_MODE_SBP_PHONE:
+        row += 1
+        ws.merge_cells(f"A{row}:G{row}")
+        ws[f"A{row}"] = "* QR сформирован в режиме СБП по номеру телефона. Если приложение банка не распознаёт QR, используйте номер и сумму вручную."
+        ws[f"A{row}"].font = Font(name="Arial", size=7, color="999999")
 
     if estimate.note:
         row += 1
@@ -668,28 +732,42 @@ def generate_payment_qr(
     purpose: str | None = None,
 ) -> dict:
     """Generate payment QR code and return all payment info."""
-    qr_payload = _build_qr_payload(
+    resolved_purpose = purpose or (f"Оплата по смете #{estimate_id}" if estimate_id is not None else None)
+    qr_payload, qr_mode = _resolve_payment_qr_payload(
         profile,
         amount=amount,
-        purpose=purpose or (f"Оплата по смете #{estimate_id}" if estimate_id is not None else None),
+        purpose=resolved_purpose,
     )
     qr_bytes = _generate_qr_image(qr_payload)
 
     import base64
     qr_base64 = base64.b64encode(qr_bytes).decode() if qr_bytes else None
+    has_qr = bool(qr_payload)
+    sbp_phone = profile.sbp_phone or profile.phone
 
     return {
         "qr_data": qr_payload,
         "qr_image": qr_base64,
         "amount": amount,
+        "qr_mode": qr_mode,
+        "has_qr": has_qr,
+        "has_qr_image": bool(qr_base64),
         "recipient": profile.payment_recipient or profile.full_name,
         "bank": profile.bank_name,
         "account": profile.settlement_account,
         "bik": profile.bik,
         "correspondent_account": profile.correspondent_account,
         "card": profile.card_number,
-        "sbp_phone": profile.sbp_phone,
+        "sbp_phone": sbp_phone,
         "inn": profile.inn,
-        "has_bank_qr": bool(qr_payload and qr_base64),
+        "has_bank_qr": qr_mode == QR_MODE_BANK and bool(qr_base64),
+        "has_sbp_phone_qr": qr_mode == QR_MODE_SBP_PHONE and bool(qr_base64),
+        "has_bank_qr_details": has_bank_qr_details(profile),
+        "has_sbp_phone_details": has_sbp_phone_qr_details(profile),
         "missing_bank_fields": get_missing_bank_qr_fields(profile),
+        "fallback_notice": (
+            "QR сформирован в режиме СБП по номеру телефона. Если приложение банка не распознаёт QR, используйте номер телефона и сумму вручную."
+            if qr_mode == QR_MODE_SBP_PHONE
+            else None
+        ),
     }

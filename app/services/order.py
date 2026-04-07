@@ -45,6 +45,66 @@ TRANSITIONS = {
     "cancelled":                set(),  # terminal
 }
 
+MASTER_CANCELLATION_REASONS = (
+    {
+        "code": "master_health",
+        "label": "Мастер не может выйти по состоянию здоровья",
+    },
+    {
+        "code": "master_force_majeure",
+        "label": "Форс-мажор со стороны мастера",
+    },
+    {
+        "code": "missing_tools_or_parts",
+        "label": "Нет нужного инструмента или запчастей",
+    },
+    {
+        "code": "reassignment_required",
+        "label": "Требуется переназначение / заказ принят ошибочно",
+    },
+)
+
+_MASTER_CANCELLATION_REASON_MAP = {
+    item["code"]: item["label"] for item in MASTER_CANCELLATION_REASONS
+}
+_MASTER_CANCELLATION_REASON_LABELS = {
+    item["label"]: item["label"] for item in MASTER_CANCELLATION_REASONS
+}
+
+
+def get_master_cancellation_reasons() -> list[dict[str, str]]:
+    return [dict(item) for item in MASTER_CANCELLATION_REASONS]
+
+
+def uses_master_cancellation_reasons(actor: User, order: Order) -> bool:
+    return (
+        order.master_id == actor.id
+        and (has_role(actor, Role.MASTER) or has_role(actor, Role.SENIOR_MASTER))
+    )
+
+
+def get_cancellation_reason_options(actor: User, order: Order) -> list[dict[str, str]]:
+    if can_cancel_order(actor, order) and uses_master_cancellation_reasons(actor, order):
+        return get_master_cancellation_reasons()
+    return []
+
+
+def normalize_cancellation_reason(actor: User, order: Order, reason: str | None) -> str:
+    normalized = (reason or "").strip()
+    if not normalized:
+        raise ValidationError("Укажите причину отмены")
+
+    if not uses_master_cancellation_reasons(actor, order):
+        return normalized
+
+    label = (
+        _MASTER_CANCELLATION_REASON_MAP.get(normalized)
+        or _MASTER_CANCELLATION_REASON_LABELS.get(normalized)
+    )
+    if not label:
+        raise ValidationError("Мастер может отменить заказ только по предустановленной причине")
+    return label
+
 
 async def create_order(
     session: AsyncSession,
@@ -158,9 +218,8 @@ async def transition_order(
     if new_status == "cancelled" and not can_cancel_order(actor, order):
         raise PermissionDenied("Недостаточно прав для отмены заказа")
 
-    # Cancellation requires a reason
-    if new_status == "cancelled" and not reason:
-        raise ValidationError("Укажите причину отмены")
+    if new_status == "cancelled":
+        reason = normalize_cancellation_reason(actor, order, reason)
 
     order.status = new_status
     if new_status == "cancelled":

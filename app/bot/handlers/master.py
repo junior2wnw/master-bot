@@ -12,7 +12,6 @@ from app.bot import keyboards, messages
 from app.bot.ui import fit_button_text, money, paginate
 from app.core.security import (
     Permission,
-    can_create_order_from_estimate,
     can_edit_estimate,
     can_request_discount_for_estimate,
     can_respond_to_estimate,
@@ -30,6 +29,7 @@ from app.services.discount import create_discount_request
 from app.services.estimate import (
     add_line_item,
     create_estimate,
+    delete_estimate as delete_estimate_service,
     update_estimate_status,
 )
 from app.services.notification import notify_estimate_for_review
@@ -504,6 +504,52 @@ async def cb_clear_estimate(callback: CallbackQuery, session: AsyncSession) -> N
     await callback.answer("🗑 Смета очищена")
 
 
+@router.callback_query(F.data.startswith("est_delete_prompt:"))
+async def cb_delete_estimate_prompt(callback: CallbackQuery, session: AsyncSession) -> None:
+    estimate_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    estimate = await _get_estimate_for_edit(session, user, estimate_id)
+    est_data = await _load_estimate_data(session, estimate_id) if estimate else None
+    if not estimate or not est_data:
+        await callback.answer("Смета не найдена", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="🗑 Да, удалить", callback_data=f"est_delete:{estimate_id}"),
+        InlineKeyboardButton(text="← К смете", callback_data=f"est_view:{estimate_id}"),
+    )
+
+    await callback.message.edit_text(
+        messages.estimate_delete_confirmation(est_data),
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("est_delete:"))
+async def cb_delete_estimate(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
+    estimate_id = int(callback.data.split(":")[1])
+    user = await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    try:
+        await delete_estimate_service(session, estimate_id=estimate_id, user_id=user.id)
+    except Exception as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    await state.clear()
+    await _show_estimates_list(callback, session, user, page=1)
+    await callback.answer("🗑 Смета удалена")
+
+
 # ═══════════════════════════════════════════════════════════════
 # SEARCH WITHIN ESTIMATE
 # ═══════════════════════════════════════════════════════════════
@@ -732,18 +778,11 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
         await state.clear()
         return
 
-    parts = message.text.strip().split(maxsplit=2)
-    if len(parts) < 3:
-        await message.answer("⚠️ Формат: <code>% 10 Причина</code> или <code>₽ 500 Причина</code>")
-        return
-
-    type_word, value_str, reason = parts
-    discount_type = "percent" if "%" in type_word else "fixed"
-
+    raw_value = message.text.strip().replace("%", "").replace(",", ".")
     try:
-        discount_value = float(value_str)
+        discount_value = float(raw_value)
     except ValueError:
-        await message.answer("⚠️ Некорректное значение скидки")
+        await message.answer("⚠️ Укажите только процент скидки числом. Например: <code>10</code> или <code>12.5</code>")
         return
 
     user = await get_user_by_telegram_id(session, message.from_user.id)
@@ -755,9 +794,8 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
             session,
             estimate_id=estimate_id,
             requested_by=user,
-            discount_type=discount_type,
+            discount_type="percent",
             discount_value=discount_value,
-            reason=reason,
         )
         approver_note = (
             "Уведомление отправлено в очередь согласования."
@@ -765,8 +803,7 @@ async def msg_discount_reason(message: Message, state: FSMContext, session: Asyn
             else "Запрос создан, но согласующий пока не назначен."
         )
         await message.answer(
-            f"✅ Запрос на скидку отправлен\n"
-            f"Тип: {discount_type}, Размер: {discount_value}, Причина: {reason}\n"
+            f"✅ Скидка обновлена до <b>{float(dr.discount_value):g}%</b>\n"
             f"{approver_note}"
         )
     except Exception as e:
@@ -982,11 +1019,11 @@ async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None
         from app.services.estimate_export import generate_payment_qr
 
         qr = generate_payment_qr(export_profile, export_est.final, estimate_id)
-        if not qr["has_bank_qr"]:
+        if qr["qr_mode"] == "none":
             missing = ", ".join(qr["missing_bank_fields"])
             await callback.message.answer(
-                "⚠️ Для банковского QR заполните реквизиты в профиле.\n"
-                f"Не хватает: {missing}"
+                "⚠️ Для оплаты заполните в профиле телефон СБП или полный набор банковских реквизитов.\n"
+                f"Для банковского QR не хватает: {missing}"
             )
             return
 
@@ -997,6 +1034,13 @@ async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None
             f"💰 <b>Сумма: {fmt_money(export_est.final)}</b>",
             "",
         ]
+        if qr["qr_mode"] == "bank":
+            lines.append("🔳 Режим: банковский QR")
+        elif qr["qr_mode"] == "sbp_phone":
+            lines.append("⚡ Режим: быстрый перевод по СБП по номеру телефона")
+            if qr.get("fallback_notice"):
+                lines.append(qr["fallback_notice"])
+        lines.append("")
         if export_profile.payment_recipient:
             lines.append(f"👤 Получатель: {export_profile.payment_recipient}")
         if export_profile.bank_name:
@@ -1007,14 +1051,19 @@ async def cb_estimate_qr(callback: CallbackQuery, session: AsyncSession) -> None
             lines.append(f"📋 БИК: <code>{export_profile.bik}</code>")
         if export_profile.card_number:
             lines.append(f"💳 Карта: <code>{export_profile.card_number}</code>")
-        if export_profile.sbp_phone:
-            lines.append(f"📱 СБП: <code>{export_profile.sbp_phone}</code>")
+        if qr.get("sbp_phone"):
+            lines.append(f"📱 СБП: <code>{qr['sbp_phone']}</code>")
+        if qr.get("missing_bank_fields"):
+            lines.append("")
+            lines.append("⚠️ Для полноценного банковского QR не хватает:")
+            lines.append(", ".join(qr["missing_bank_fields"]))
 
         text = "\n".join(lines)
 
         if qr.get("qr_image"):
-            from aiogram.types import BufferedInputFile
             import base64
+
+            from aiogram.types import BufferedInputFile
 
             photo = BufferedInputFile(base64.b64decode(qr["qr_image"]), filename="qr.png")
             await callback.message.answer_photo(photo, caption=text)
