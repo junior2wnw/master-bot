@@ -86,6 +86,7 @@ MAX Bot / Mini App -> FastAPI -> Services -> SQLAlchemy models -> PostgreSQL
 - `MAX_API_BASE_URL` — базовый URL MAX API, по умолчанию `https://platform-api.max.ru`
 - `MAX_POLLING_TIMEOUT_SEC` — таймаут long polling
 - `WEBAPP_URL` — публичный URL мини-приложения
+- `OWNER_TELEGRAM_ID` — историческое имя переменной для внешнего ID владельца; в MAX сюда ставится `user_id` пользователя MAX
 - `PLATFORM_NAME` — пользовательское имя платформы, по умолчанию `ПриДел`
 
 Полный шаблон смотрите в `.env.example`.

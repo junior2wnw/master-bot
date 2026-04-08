@@ -7,7 +7,9 @@ import logging
 from typing import Any
 
 from app.config import get_settings
+from app.database import get_async_session
 from app.max_bot.api import MaxAPIError, MaxBotAPI
+from app.services.auth import get_or_create_user
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,7 @@ async def handle_update(api: MaxBotAPI, bot_info: dict[str, Any], update: dict[s
 
 
 async def _handle_bot_started(api: MaxBotAPI, bot_info: dict[str, Any], update: dict[str, Any]) -> None:
+    await _ensure_registered_user(update.get("user") or {})
     await _send_primary_message(
         api,
         bot_info,
@@ -94,6 +97,8 @@ async def _handle_bot_started(api: MaxBotAPI, bot_info: dict[str, Any], update: 
 
 async def _handle_message_created(api: MaxBotAPI, bot_info: dict[str, Any], update: dict[str, Any]) -> None:
     message = update.get("message") or {}
+    sender = message.get("sender") or {}
+    await _ensure_registered_user(sender)
     text = ((message.get("body") or {}).get("text") or "").strip()
     normalized = text.lower()
 
@@ -101,8 +106,8 @@ async def _handle_message_created(api: MaxBotAPI, bot_info: dict[str, Any], upda
         await _send_primary_message(
             api,
             bot_info,
-            text=_build_welcome_text(message.get("sender") or {}),
-            user_id=_first_int((message.get("sender") or {}).get("user_id")),
+            text=_build_welcome_text(sender),
+            user_id=_first_int(sender.get("user_id")),
             chat_id=_extract_chat_id(message),
         )
         return
@@ -112,7 +117,7 @@ async def _handle_message_created(api: MaxBotAPI, bot_info: dict[str, Any], upda
             api,
             bot_info,
             text=_build_help_text(),
-            user_id=_first_int((message.get("sender") or {}).get("user_id")),
+            user_id=_first_int(sender.get("user_id")),
             chat_id=_extract_chat_id(message),
         )
         return
@@ -121,13 +126,16 @@ async def _handle_message_created(api: MaxBotAPI, bot_info: dict[str, Any], upda
         api,
         bot_info,
         text=_build_fallback_text(),
-        user_id=_first_int((message.get("sender") or {}).get("user_id")),
+        user_id=_first_int(sender.get("user_id")),
         chat_id=_extract_chat_id(message),
     )
 
 
 async def _handle_message_callback(api: MaxBotAPI, bot_info: dict[str, Any], update: dict[str, Any]) -> None:
     callback = update.get("callback") or {}
+    await _ensure_registered_user(
+        callback.get("user") or callback.get("sender") or update.get("user") or {}
+    )
     callback_id = callback.get("callback_id")
     payload = (callback.get("payload") or "").strip().lower()
     if not callback_id:
@@ -167,6 +175,32 @@ async def _send_primary_message(
         text=text,
         attachments=_build_keyboard(bot_info),
     )
+
+
+async def _ensure_registered_user(user_payload: dict[str, Any]) -> None:
+    external_user_id = _first_int(user_payload.get("user_id"))
+    if not external_user_id or user_payload.get("is_bot"):
+        return
+
+    first_name = (
+        (user_payload.get("first_name") or user_payload.get("name") or "User").strip() or "User"
+    )
+    last_name = (user_payload.get("last_name") or "").strip() or None
+    username = (user_payload.get("username") or "").strip() or None
+
+    session_factory = get_async_session()
+    try:
+        async with session_factory() as session:
+            await get_or_create_user(
+                session,
+                telegram_id=external_user_id,
+                first_name=first_name,
+                last_name=last_name,
+                username=username,
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("Failed to sync MAX user profile", extra={"external_user_id": external_user_id})
 
 
 def _build_keyboard(bot_info: dict[str, Any]) -> list[dict[str, Any]] | None:
