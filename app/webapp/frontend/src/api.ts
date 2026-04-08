@@ -12,6 +12,8 @@ import type {
   EstimateSummary,
   JobPost,
   LayoutPayload,
+  MasterProfileResponse,
+  MasterReviewItem,
   NetworkResponse,
   NotificationItem,
   OrderDetail,
@@ -208,7 +210,7 @@ export const api = {
     });
   },
   getMaster(externalUserId: number, masterExternalUserId: number) {
-    return request<PublicProfileResponse>(`/network/masters/${masterExternalUserId}`);
+    return request<MasterProfileResponse>(`/network/masters/${masterExternalUserId}`);
   },
   getPublicProfile(externalUserId: number) {
     return request<PublicProfileResponse>("/network/profile");
@@ -325,6 +327,16 @@ export const api = {
   },
   getOrderPayment(externalUserId: number, orderId: number) {
     return request<OrderPaymentInfo>(`/orders/${orderId}/payment`);
+  },
+  createOrderReview(
+    externalUserId: number,
+    orderId: number,
+    body: { rating: number; headline?: string | null; body?: string | null; is_public: boolean },
+  ) {
+    return request<MasterReviewItem>(`/orders/${orderId}/review`, {
+      method: "POST",
+      body,
+    });
   },
   listNotifications(externalUserId: number) {
     return request<NotificationItem[]>("/notifications");

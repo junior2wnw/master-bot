@@ -145,3 +145,32 @@ class JobPostResponse(Base, TimestampMixin):
 
     job_post = relationship("JobPost", back_populates="responses", lazy="selectin")
     responder = relationship("User", lazy="selectin")
+
+
+class MasterReview(Base, TimestampMixin):
+    """Verified review left by a client after an executed order."""
+
+    __tablename__ = "master_reviews"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_master_reviews_order"),
+        UniqueConstraint("author_user_id", "order_id", name="uq_master_reviews_author_order"),
+        Index("ix_master_reviews_master_created", "master_user_id", "created_at"),
+        Index("ix_master_reviews_author_created", "author_user_id", "created_at"),
+        CheckConstraint("rating >= 1 AND rating <= 5", name="ck_master_reviews_rating_range"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    headline: Mapped[str | None] = mapped_column(String(120))
+    body: Mapped[str | None] = mapped_column(Text)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    order = relationship("Order", lazy="selectin")
+    master = relationship("User", foreign_keys=[master_user_id], lazy="selectin")
+    author = relationship("User", foreign_keys=[author_user_id], lazy="selectin")

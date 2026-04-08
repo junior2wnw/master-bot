@@ -19,6 +19,7 @@ import type {
   EstimateSummary,
   JobPost,
   MasterCard,
+  MasterReviewItem,
   NotificationItem,
   OrderDetail,
   OrderSummary,
@@ -26,6 +27,7 @@ import type {
   PanelMeta,
   PublicProfileResponse,
   RoleModeResponse,
+  TrustBadge,
 } from "./types";
 
 const queryClient = new QueryClient({
@@ -110,6 +112,67 @@ function errorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+function reviewNoun(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return "отзыв";
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "отзыва";
+  }
+  return "отзывов";
+}
+
+function ratingSummary(ratingAverage: number, ratingCount: number): string {
+  if (!ratingCount) {
+    return "Пока без отзывов";
+  }
+  return `${ratingAverage.toFixed(1)} • ${ratingCount} ${reviewNoun(ratingCount)}`;
+}
+
+function renderStars(rating: number): string {
+  const filled = Math.max(0, Math.min(5, Math.round(rating)));
+  return `${"★".repeat(filled)}${"☆".repeat(Math.max(0, 5 - filled))}`;
+}
+
+function TrustBadgeCloud({ badges, limit = 3 }: { badges: TrustBadge[]; limit?: number }) {
+  if (!badges.length) {
+    return null;
+  }
+
+  return (
+    <div className="trust-badges">
+      {badges.slice(0, limit).map((badge) => (
+        <span key={badge.code} className={`pill trust-badge ${badge.tone === "success" ? "tone-success" : "tone-neutral"}`}>
+          {badge.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ReviewCard({ review }: { review: MasterReviewItem }) {
+  return (
+    <article className="glass-card review-card">
+      <div className="card-topline">
+        <div className="review-rating">
+          <strong>{renderStars(review.rating)}</strong>
+          <span>{review.rating.toFixed(1)}</span>
+        </div>
+        <span className="muted">{formatAgo(review.created_at)}</span>
+      </div>
+      {review.headline ? <h4>{review.headline}</h4> : null}
+      {review.body ? <p>{review.body}</p> : <p className="muted">Клиент подтвердил работу и оставил оценку.</p>}
+      <div className="meta-cloud">
+        <span>Заказ #{review.order_id}</span>
+        <span>{review.author.name}</span>
+        {review.is_public ? <span>Публичный отзыв</span> : <span>Частный отзыв</span>}
+      </div>
+    </article>
+  );
 }
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
@@ -577,12 +640,20 @@ function NetworkPanel({
               </div>
               <h4>{master.name}</h4>
               <p className="card-title">{master.title}</p>
+              <div className="trust-summary">
+                <span className="rating-inline">
+                  <strong>{master.rating_count ? renderStars(master.rating_average) : "☆☆☆☆☆"}</strong>
+                  <span>{ratingSummary(master.rating_average, master.rating_count)}</span>
+                </span>
+                {master.response_time_label ? <span className="muted">{master.response_time_label}</span> : null}
+              </div>
               {master.bio ? <p>{master.bio}</p> : null}
               <div className="meta-cloud">
                 {master.city ? <span>{master.city}</span> : null}
                 {master.experience_years ? <span>{master.experience_years}+ лет</span> : null}
                 {master.hourly_rate_from ? <span>от {money(master.hourly_rate_from)}</span> : null}
               </div>
+              <TrustBadgeCloud badges={master.trust_badges} limit={2} />
               <div className="tag-row">
                 {master.skills.slice(0, 4).map((skill) => (
                   <span key={skill} className="tag">
@@ -1370,21 +1441,74 @@ function MasterDrawer({
         </div>
         {masterQuery.data ? (
           <div className="panel-stack">
-            <div className="glass-card">
-              <div className="meta-cloud">
-                {masterQuery.data.city ? <span>{masterQuery.data.city}</span> : null}
-                <span>{masterQuery.data.completed_jobs} завершённых работ</span>
-                <span>{statusLabel(masterQuery.data.availability_status)}</span>
+            <SectionCard title="Профиль" subtitle="Короткий срез доверия и специализации без перегруза.">
+              <div className="glass-card">
+                <div className="trust-summary">
+                  <span className="rating-inline">
+                    <strong>{masterQuery.data.rating_count ? renderStars(masterQuery.data.rating_average) : "☆☆☆☆☆"}</strong>
+                    <span>{ratingSummary(masterQuery.data.rating_average, masterQuery.data.rating_count)}</span>
+                  </span>
+                  {masterQuery.data.response_time_label ? <span className="muted">{masterQuery.data.response_time_label}</span> : null}
+                </div>
+                <TrustBadgeCloud badges={masterQuery.data.trust_badges} limit={4} />
+                <div className="meta-cloud">
+                  {masterQuery.data.city ? <span>{masterQuery.data.city}</span> : null}
+                  <span>{masterQuery.data.completed_jobs} завершённых работ</span>
+                  <span>{statusLabel(masterQuery.data.availability_status)}</span>
+                  {masterQuery.data.hourly_rate_from ? <span>от {money(masterQuery.data.hourly_rate_from)}</span> : null}
+                </div>
+                <p>{masterQuery.data.bio || "Профиль пока без описания."}</p>
               </div>
-              <p>{masterQuery.data.bio || "Профиль пока без описания."}</p>
-            </div>
-            <div className="tag-row">
-              {masterQuery.data.skills.map((skill) => (
-                <span key={skill} className="tag">
-                  {skill}
-                </span>
-              ))}
-            </div>
+            </SectionCard>
+            <SectionCard title="Навыки" subtitle="Только ключевые теги, чтобы быстро понять специализацию.">
+              <div className="tag-row">
+                {masterQuery.data.skills.length ? (
+                  masterQuery.data.skills.map((skill) => (
+                    <span key={skill} className="tag">
+                      {skill}
+                    </span>
+                  ))
+                ) : (
+                  <span className="muted">Навыки пока не заполнены.</span>
+                )}
+              </div>
+            </SectionCard>
+            {masterQuery.data.portfolio.length ? (
+              <SectionCard title="Портфолио" subtitle="Короткая витрина подтверждённых кейсов и ссылок.">
+                <div className="card-list">
+                  {masterQuery.data.portfolio.slice(0, 3).map((item, index) => (
+                    <article key={`${item.title}-${index}`} className="glass-card compact-card align-start">
+                      <div>
+                        <h4>{item.title}</h4>
+                        <p>{item.kind}</p>
+                      </div>
+                      {item.url ? (
+                        <a className="btn" href={item.url} target="_blank" rel="noreferrer">
+                          Открыть
+                        </a>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              </SectionCard>
+            ) : null}
+            <SectionCard
+              title="Проверенные отзывы"
+              subtitle="Отзывы привязаны к завершённым заказам, поэтому доверие строится на реальных сделках."
+            >
+              {masterQuery.data.reviews.length ? (
+                <div className="timeline-list">
+                  {masterQuery.data.reviews.map((review) => (
+                    <ReviewCard key={review.id} review={review} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Отзывов пока нет"
+                  subtitle="Когда по завершённым заказам появятся оценки, здесь будет спокойная лента проверенной репутации."
+                />
+              )}
+            </SectionCard>
           </div>
         ) : (
           <EmptyState title="Загружаем профиль" subtitle="Сейчас подтянем все публичные данные мастера." />
@@ -1871,10 +1995,18 @@ function OrderDrawer({
   const queryClient = useQueryClient();
   const [cancelReason, setCancelReason] = useState("");
   const [showPayment, setShowPayment] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewHeadline, setReviewHeadline] = useState("");
+  const [reviewBody, setReviewBody] = useState("");
+  const [reviewIsPublic, setReviewIsPublic] = useState(true);
 
   useEffect(() => {
     setCancelReason("");
     setShowPayment(false);
+    setReviewRating(5);
+    setReviewHeadline("");
+    setReviewBody("");
+    setReviewIsPublic(true);
   }, [orderId]);
 
   const orderQuery = useQuery({
@@ -1895,6 +2027,9 @@ function OrderDrawer({
       queryClient.invalidateQueries({ queryKey: ["order-detail", externalUserId, orderId] }),
       queryClient.invalidateQueries({ queryKey: ["bootstrap", externalUserId] }),
       queryClient.invalidateQueries({ queryKey: ["notifications", externalUserId] }),
+      queryClient.invalidateQueries({ queryKey: ["masters"] }),
+      queryClient.invalidateQueries({ queryKey: ["master"] }),
+      queryClient.invalidateQueries({ queryKey: ["public-profile", externalUserId] }),
     ]);
   };
 
@@ -1907,6 +2042,23 @@ function OrderDrawer({
   const assignMutation = useMutation({
     mutationFn: async () => api.assignOrderToSelf(externalUserId, orderId as number),
     onSuccess: refreshOrderData,
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: async () =>
+      api.createOrderReview(externalUserId, orderId as number, {
+        rating: reviewRating,
+        headline: reviewHeadline.trim() || null,
+        body: reviewBody.trim() || null,
+        is_public: reviewIsPublic,
+      }),
+    onSuccess: async () => {
+      setReviewHeadline("");
+      setReviewBody("");
+      setReviewRating(5);
+      setReviewIsPublic(true);
+      await refreshOrderData();
+    },
   });
 
   if (orderId === null) {
@@ -2084,6 +2236,62 @@ function OrderDrawer({
                 <p className="inline-error">{errorMessage(assignMutation.error, "Не удалось назначить заказ")}</p>
               ) : null}
             </SectionCard>
+
+            {order.review.item || order.review.can_create ? (
+              <SectionCard
+                title="Отзыв о мастере"
+                subtitle="Оценка создаётся прямо из завершённой сделки, поэтому путь остаётся коротким и понятным."
+              >
+                {order.review.item ? (
+                  <ReviewCard review={order.review.item} />
+                ) : null}
+
+                {order.review.can_create ? (
+                  <div className="inline-composer">
+                    <div className="review-rating-picker">
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <button
+                          key={value}
+                          className={`star-btn ${reviewRating >= value ? "active" : ""}`}
+                          onClick={() => setReviewRating(value)}
+                        >
+                          ★
+                        </button>
+                      ))}
+                      <span className="muted">{reviewRating} из 5</span>
+                    </div>
+                    <input
+                      className="input"
+                      placeholder="Короткий заголовок отзыва"
+                      value={reviewHeadline}
+                      onChange={(event) => setReviewHeadline(event.target.value)}
+                    />
+                    <textarea
+                      className="textarea compact"
+                      placeholder="Что особенно понравилось в работе мастера"
+                      value={reviewBody}
+                      onChange={(event) => setReviewBody(event.target.value)}
+                    />
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={reviewIsPublic}
+                        onChange={(event) => setReviewIsPublic(event.target.checked)}
+                      />
+                      <span>Показывать отзыв в публичном профиле мастера</span>
+                    </label>
+                    <div className="action-row">
+                      <button className="btn btn-primary" onClick={() => void reviewMutation.mutateAsync()}>
+                        {reviewMutation.isPending ? "Сохраняем..." : "Оставить отзыв"}
+                      </button>
+                    </div>
+                    {reviewMutation.error ? (
+                      <p className="inline-error">{errorMessage(reviewMutation.error, "Не удалось сохранить отзыв")}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </SectionCard>
+            ) : null}
 
             {order.history.length ? (
               <SectionCard title="История" subtitle="Переходы и причины изменений по заказу.">

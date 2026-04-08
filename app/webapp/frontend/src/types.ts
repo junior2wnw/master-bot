@@ -119,6 +119,7 @@ export interface MasterCard {
   tier: string;
   specialization: string;
   response_time_label: string;
+  trust_badges: TrustBadge[];
 }
 
 export interface BoardResponse {
@@ -272,7 +273,32 @@ export interface ProfileResponse {
   max_role_label: string;
 }
 
-export interface PublicProfileResponse extends MasterCard {
+export interface TrustBadge {
+  code: string;
+  label: string;
+  tone: string;
+}
+
+export interface MasterReviewItem {
+  id: number;
+  order_id: number;
+  rating: number;
+  headline: string;
+  body: string;
+  is_public: boolean;
+  created_at: string | null;
+  author: {
+    id: number;
+    name: string;
+    external_user_id: number | null;
+  };
+}
+
+export interface MasterProfileResponse extends MasterCard {
+  reviews: MasterReviewItem[];
+}
+
+export interface PublicProfileResponse extends MasterProfileResponse {
   edit: {
     headline: string;
     bio: string;
@@ -488,6 +514,10 @@ export interface OrderDetail {
     reason: string | null;
     at: string | null;
   }>;
+  review: {
+    can_create: boolean;
+    item: MasterReviewItem | null;
+  };
 }
 
 export interface OrderPaymentInfo {

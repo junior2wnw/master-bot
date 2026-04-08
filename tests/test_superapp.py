@@ -9,7 +9,13 @@ from app.models.hierarchy import Branch, BranchMember
 from app.models.master_profile import MasterProfile
 from app.models.notification import Notification
 from app.models.order import Order
-from app.models.superapp import JobPost, JobPostResponse, PublicMasterProfile, WorkspaceLayout
+from app.models.superapp import (
+    JobPost,
+    JobPostResponse,
+    MasterReview,
+    PublicMasterProfile,
+    WorkspaceLayout,
+)
 from app.models.user import User, UserRole
 from app.services import superapp as superapp_svc
 
@@ -37,6 +43,7 @@ async def _make_session_factory():
                     WorkspaceLayout.__table__,
                     JobPost.__table__,
                     JobPostResponse.__table__,
+                    MasterReview.__table__,
                 ],
             )
         )
@@ -177,5 +184,148 @@ async def test_public_master_profile_must_be_published_for_network_listing(monke
         assert len(visible["items"]) == 1
         assert visible["items"][0]["title"] == "Электрик для квартиры и офиса"
         assert "Электрика" in visible["items"][0]["skills"]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_master_review_updates_public_profile_and_order_state(monkeypatch):
+    engine, session_factory = await _make_session_factory()
+    monkeypatch.setattr(superapp_svc, "log_audit", _noop)
+
+    async with session_factory() as session:
+        client = User(telegram_id=4001, first_name="Клиент")
+        master = User(telegram_id=4002, first_name="Алик")
+        session.add_all([client, master])
+        await session.flush()
+        session.add_all(
+            [
+                UserRole(user_id=client.id, role_code="client"),
+                UserRole(user_id=master.id, role_code="master"),
+            ]
+        )
+        session.add(MasterProfile(user_id=master.id, specialization="Электрик"))
+        session.add(
+            PublicMasterProfile(
+                user_id=master.id,
+                headline="Электрик для квартиры и офиса",
+                city="Уфа",
+                response_time_label="Отвечает в течение часа",
+                portfolio_json=[
+                    {"title": "Щит под ключ", "url": "https://example.com/1", "kind": "project"},
+                    {"title": "Замена проводки", "url": "https://example.com/2", "kind": "project"},
+                ],
+                is_public=True,
+            )
+        )
+        order = Order(
+            client_id=client.id,
+            master_id=master.id,
+            status="completed",
+            address="Уфа, Ленина 1",
+            urgency="normal",
+            source_channel="max_miniapp",
+        )
+        session.add(order)
+        await session.flush()
+        await session.refresh(client, ["roles"])
+        await session.refresh(master, ["roles"])
+
+        review = await superapp_svc.create_master_review(
+            session,
+            viewer=client,
+            order_id=order.id,
+            rating=5,
+            headline="Отличная работа",
+            body="Аккуратно, вовремя и без лишних вопросов.",
+            is_public=True,
+        )
+
+        profile = await superapp_svc.get_master_network_profile(
+            session,
+            viewer=client,
+            external_user_id=master.telegram_id,
+        )
+        order_review_state = await superapp_svc.build_order_review_state(
+            session,
+            viewer=client,
+            order=order,
+        )
+        notifications = list((await session.execute(select(Notification))).scalars().all())
+
+        assert review["rating"] == 5
+        assert profile["rating_count"] == 1
+        assert profile["rating_average"] == pytest.approx(5.0)
+        assert profile["reviews"][0]["headline"] == "Отличная работа"
+        assert {item["code"] for item in profile["trust_badges"]} >= {"portfolio", "response-time"}
+        assert order_review_state["can_create"] is False
+        assert order_review_state["item"]["order_id"] == order.id
+        assert any(
+            notification.user_id == master.id and notification.event_type == "master.review.created"
+            for notification in notifications
+        )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_master_review_requires_completed_order_and_blocks_duplicates(monkeypatch):
+    engine, session_factory = await _make_session_factory()
+    monkeypatch.setattr(superapp_svc, "log_audit", _noop)
+
+    async with session_factory() as session:
+        client = User(telegram_id=5001, first_name="Клиент")
+        master = User(telegram_id=5002, first_name="Мастер")
+        session.add_all([client, master])
+        await session.flush()
+        session.add_all(
+            [
+                UserRole(user_id=client.id, role_code="client"),
+                UserRole(user_id=master.id, role_code="master"),
+            ]
+        )
+        order = Order(
+            client_id=client.id,
+            master_id=master.id,
+            status="in_progress",
+            address="Уфа, Пушкина 7",
+            urgency="normal",
+            source_channel="max_miniapp",
+        )
+        session.add(order)
+        await session.flush()
+        await session.refresh(client, ["roles"])
+
+        with pytest.raises(superapp_svc.ValidationError):
+            await superapp_svc.create_master_review(
+                session,
+                viewer=client,
+                order_id=order.id,
+                rating=4,
+                headline="Пока рано",
+                body="Работа еще не завершена.",
+            )
+
+        order.status = "completed"
+        await session.flush()
+
+        await superapp_svc.create_master_review(
+            session,
+            viewer=client,
+            order_id=order.id,
+            rating=4,
+            headline="Хорошо",
+            body="Работа выполнена.",
+        )
+
+        with pytest.raises(superapp_svc.ConflictError):
+            await superapp_svc.create_master_review(
+                session,
+                viewer=client,
+                order_id=order.id,
+                rating=5,
+                headline="Повтор",
+                body="Второй отзыв запрещен.",
+            )
 
     await engine.dispose()

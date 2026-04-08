@@ -22,7 +22,7 @@ from app.models.order import Order, OrderStatusHistory
 from app.models.payment import CommissionPolicy, CommissionRecord, Payment
 from app.models.project_suggestion import ProjectSuggestion
 from app.models.staffing import StaffingAction
-from app.models.superapp import JobPost, JobPostResponse, PublicMasterProfile, WorkspaceLayout
+from app.models.superapp import JobPost, JobPostResponse, MasterReview, PublicMasterProfile, WorkspaceLayout
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -40,7 +40,7 @@ __all__ = [
     "ProjectSuggestion",
     "ApprovalRequest",
     "StaffingAction",
-    "JobPost", "JobPostResponse", "PublicMasterProfile", "WorkspaceLayout",
+    "JobPost", "JobPostResponse", "MasterReview", "PublicMasterProfile", "WorkspaceLayout",
     "AuditLog",
     "FeatureFlag", "SystemSetting",
     "PromptTemplate", "AIRequestLog",

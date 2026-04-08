@@ -13,7 +13,13 @@ from app.core.security import Permission, Role, has_permission, has_role
 from app.models.master_profile import MasterProfile
 from app.models.notification import Notification
 from app.models.order import Order
-from app.models.superapp import JobPost, JobPostResponse, PublicMasterProfile, WorkspaceLayout
+from app.models.superapp import (
+    JobPost,
+    JobPostResponse,
+    MasterReview,
+    PublicMasterProfile,
+    WorkspaceLayout,
+)
 from app.models.user import User, UserRole
 from app.services.profile import get_profile_payload, profile_has_bank_details
 from app.services.workspace import count_unread_notifications_for_user, get_dashboard_data
@@ -21,6 +27,7 @@ from app.services.workspace import count_unread_notifications_for_user, get_dash
 ACTIVE_JOB_RESPONSE_STATUSES = {"submitted", "shortlisted", "accepted"}
 PROVIDER_ROLE_CODES = {"master", "senior_master"}
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+REVIEWABLE_ORDER_STATUSES = {"completed", "paid"}
 
 PANEL_DEFINITIONS = (
     {
@@ -401,6 +408,263 @@ def _clean_portfolio_entries(entries: list[dict] | None) -> list[dict]:
     return cleaned_entries
 
 
+def _serialize_master_review(review: MasterReview) -> dict:
+    return {
+        "id": review.id,
+        "order_id": review.order_id,
+        "rating": int(review.rating),
+        "headline": review.headline or "",
+        "body": review.body or "",
+        "is_public": bool(review.is_public),
+        "created_at": review.created_at.isoformat() if review.created_at else None,
+        "author": {
+            "id": review.author.id if review.author else review.author_user_id,
+            "name": review.author.display_name if review.author else "Клиент",
+            "external_user_id": review.author.telegram_id if review.author else None,
+        },
+    }
+
+
+def _build_trust_badges(
+    *,
+    public_profile: PublicMasterProfile | None,
+    completed_jobs: int,
+    portfolio_size: int,
+) -> list[dict]:
+    badges: list[dict] = []
+    verification_status = (public_profile.verification_status if public_profile else None) or "community"
+    rating_average = float(public_profile.rating_average or 0) if public_profile else 0.0
+    rating_count = int(public_profile.rating_count or 0) if public_profile else 0
+    response_time_label = (public_profile.response_time_label if public_profile else None) or ""
+
+    if verification_status in {"verified", "trusted", "pro"}:
+        badges.append(
+            {
+                "code": "verified",
+                "label": "Проверен платформой",
+                "tone": "success",
+            }
+        )
+    if rating_count >= 3 and rating_average >= 4.7:
+        badges.append(
+            {
+                "code": "top-rated",
+                "label": f"{rating_average:.1f} рейтинг",
+                "tone": "success",
+            }
+        )
+    if completed_jobs >= 10:
+        badges.append(
+            {
+                "code": "experienced",
+                "label": f"{completed_jobs}+ завершено",
+                "tone": "neutral",
+            }
+        )
+    if portfolio_size >= 2:
+        badges.append(
+            {
+                "code": "portfolio",
+                "label": "Есть портфолио",
+                "tone": "neutral",
+            }
+        )
+    if response_time_label:
+        badges.append(
+            {
+                "code": "response-time",
+                "label": response_time_label,
+                "tone": "neutral",
+            }
+        )
+    return badges[:4]
+
+
+async def _ensure_public_master_profile(session: AsyncSession, user_id: int) -> PublicMasterProfile:
+    record = (
+        await session.execute(
+            select(PublicMasterProfile).where(PublicMasterProfile.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if record is not None:
+        return record
+
+    record = PublicMasterProfile(user_id=user_id)
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def refresh_public_master_profile_metrics(
+    session: AsyncSession,
+    *,
+    master_user_id: int,
+) -> PublicMasterProfile:
+    record = await _ensure_public_master_profile(session, master_user_id)
+
+    review_stats = (
+        await session.execute(
+            select(
+                func.coalesce(func.avg(MasterReview.rating), 0),
+                func.count(MasterReview.id),
+            ).where(MasterReview.master_user_id == master_user_id)
+        )
+    ).one()
+    completed_jobs = (
+        await session.execute(
+            select(func.count(Order.id)).where(
+                Order.master_id == master_user_id,
+                Order.status.in_(list(REVIEWABLE_ORDER_STATUSES)),
+            )
+        )
+    ).scalar() or 0
+
+    record.rating_average = round(float(review_stats[0] or 0), 2)
+    record.rating_count = int(review_stats[1] or 0)
+    record.completed_jobs = int(completed_jobs)
+    await session.flush()
+    return record
+
+
+async def list_master_reviews(
+    session: AsyncSession,
+    *,
+    viewer: User | None,
+    master_user_id: int,
+    limit: int = 6,
+) -> list[dict]:
+    query = (
+        select(MasterReview)
+        .where(MasterReview.master_user_id == master_user_id)
+        .order_by(MasterReview.created_at.desc(), MasterReview.id.desc())
+        .limit(min(max(limit, 1), 12))
+    )
+    if not (
+        viewer
+        and (
+            _can_view_control(viewer)
+            or viewer.id == master_user_id
+        )
+    ):
+        query = query.where(MasterReview.is_public == True)  # noqa: E712
+
+    reviews = list((await session.execute(query)).scalars().all())
+    return [_serialize_master_review(review) for review in reviews]
+
+
+def _can_create_master_review(viewer: User, order: Order) -> bool:
+    return (
+        order.client_id == viewer.id
+        and order.master_id is not None
+        and order.status in REVIEWABLE_ORDER_STATUSES
+    )
+
+
+async def build_order_review_state(
+    session: AsyncSession,
+    *,
+    viewer: User,
+    order: Order,
+) -> dict:
+    review = (
+        await session.execute(
+            select(MasterReview).where(MasterReview.order_id == order.id)
+        )
+    ).scalar_one_or_none()
+
+    return {
+        "can_create": review is None and _can_create_master_review(viewer, order),
+        "item": _serialize_master_review(review) if review else None,
+    }
+
+
+async def create_master_review(
+    session: AsyncSession,
+    *,
+    viewer: User,
+    order_id: int,
+    rating: int,
+    headline: str | None = None,
+    body: str | None = None,
+    is_public: bool = True,
+) -> dict:
+    order = (
+        await session.execute(select(Order).where(Order.id == order_id))
+    ).scalar_one_or_none()
+    if not order:
+        raise NotFoundError("Заказ")
+    if order.client_id != viewer.id:
+        raise PermissionDenied("Оставить отзыв может только клиент по этому заказу")
+    if order.master_id is None:
+        raise ValidationError("По заказу еще не назначен мастер")
+    if order.status not in REVIEWABLE_ORDER_STATUSES:
+        raise ValidationError("Отзыв можно оставить только после завершения заказа")
+
+    try:
+        normalized_rating = int(rating)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Оценка должна быть числом от 1 до 5") from exc
+    if normalized_rating < 1 or normalized_rating > 5:
+        raise ValidationError("Оценка должна быть от 1 до 5")
+
+    existing = (
+        await session.execute(
+            select(MasterReview).where(MasterReview.order_id == order_id)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError("Отзыв по этому заказу уже сохранен")
+
+    review = MasterReview(
+        order_id=order.id,
+        master_user_id=order.master_id,
+        author_user_id=viewer.id,
+        rating=normalized_rating,
+        headline=_clean_text(headline, field="headline", max_length=120, allow_empty=True),
+        body=_clean_text(body, field="body", max_length=1200, allow_empty=True),
+        is_public=bool(is_public),
+        author=viewer,
+    )
+    session.add(review)
+    await session.flush()
+
+    updated_profile = await refresh_public_master_profile_metrics(
+        session,
+        master_user_id=order.master_id,
+    )
+
+    session.add(
+        Notification(
+            user_id=order.master_id,
+            event_type="master.review.created",
+            title="Новый отзыв по заказу",
+            body=f"{viewer.display_name} оставил отзыв {normalized_rating}/5 по заказу #{order.id}",
+            channel="max",
+            entity_type="order",
+            entity_id=order.id,
+            status="pending",
+        )
+    )
+    await session.flush()
+
+    await log_audit(
+        session,
+        user_id=viewer.id,
+        action="master_review.created",
+        entity_type="master_review",
+        entity_id=review.id,
+        new_value={
+            "order_id": order.id,
+            "master_user_id": order.master_id,
+            "rating": normalized_rating,
+            "is_public": bool(is_public),
+            "rating_average": float(updated_profile.rating_average or 0),
+            "rating_count": int(updated_profile.rating_count or 0),
+        },
+    )
+    return _serialize_master_review(review)
+
+
 def _serialize_job_post(
     *,
     post: JobPost,
@@ -688,7 +952,13 @@ def _serialize_public_profile(
     skills = list(public.skills_json or [])
     if not skills and specialization:
         skills = [specialization]
+    portfolio = list(public.portfolio_json or [])
     computed_completed = max(int(public.completed_jobs or 0), completed_jobs)
+    trust_badges = _build_trust_badges(
+        public_profile=public_profile,
+        completed_jobs=computed_completed,
+        portfolio_size=len(portfolio),
+    )
 
     return {
         "user_id": user.id,
@@ -708,12 +978,13 @@ def _serialize_public_profile(
         "completed_jobs": computed_completed,
         "active_jobs": active_jobs,
         "skills": skills,
-        "portfolio": list(public.portfolio_json or []),
+        "portfolio": portfolio,
         "accent_color": public.accent_color or "#95c7ff",
         "is_public": bool(public.is_public),
         "tier": _role_tier(user),
         "specialization": specialization or "",
         "response_time_label": public.response_time_label or "",
+        "trust_badges": trust_badges,
     }
 
 
@@ -875,13 +1146,20 @@ async def get_master_network_profile(
         )
     ).scalar() or 0
 
-    return _serialize_public_profile(
+    payload = _serialize_public_profile(
         user=user,
         public_profile=public_profile,
         master_profile=master_profile,
         completed_jobs=completed_jobs,
         active_jobs=active_jobs,
     )
+    payload["reviews"] = await list_master_reviews(
+        session,
+        viewer=viewer,
+        master_user_id=user.id,
+        limit=6,
+    )
+    return payload
 
 
 async def get_public_master_profile_for_edit(
@@ -909,6 +1187,12 @@ async def get_public_master_profile_for_edit(
         master_profile=master_profile,
         completed_jobs=0,
         active_jobs=0,
+    )
+    payload["reviews"] = await list_master_reviews(
+        session,
+        viewer=user,
+        master_user_id=user.id,
+        limit=6,
     )
     payload["edit"] = {
         "headline": public_profile.headline if public_profile else (master_profile.specialization if master_profile else ""),

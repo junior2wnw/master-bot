@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.api.shared import get_current_user
 from app.config import get_settings
+from app.core.exceptions import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from app.core.security import (
     Role,
     can_create_estimate,
@@ -50,6 +51,7 @@ from app.services.profile import (
 )
 from app.services.role_context import build_role_context_payload, set_active_role
 from app.services.session_auth import create_session_token
+from app.services.superapp import build_order_review_state, create_master_review
 from app.services.webapp_auth import validate_webapp_init_data
 from app.services.workspace import (
     get_dashboard_data,
@@ -671,6 +673,12 @@ async def get_order(
         select(Payment).where(Payment.order_id == order_id).order_by(Payment.created_at.desc()).limit(1)
     )).scalar_one_or_none()
 
+    review_state = await build_order_review_state(
+        session,
+        viewer=user,
+        order=order,
+    )
+
     return {
         "id": order.id,
         "status": order.status,
@@ -696,12 +704,20 @@ async def get_order(
             }
             for h in history
         ],
+        "review": review_state,
     }
 
 
 class OrderStatusUpdate(BaseModel):
     status: str
     reason: str | None = None
+
+
+class OrderReviewCreateRequest(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    headline: str | None = Field(default=None, max_length=120)
+    body: str | None = Field(default=None, max_length=1200)
+    is_public: bool = True
 
 
 @router.post("/orders/{order_id}/status")
@@ -717,6 +733,33 @@ async def update_order_status(
         user_id=user.id, reason=body.reason,
     )
     return {"id": order.id, "status": order.status}
+
+
+@router.post("/orders/{order_id}/review")
+async def create_order_review(
+    order_id: int,
+    body: OrderReviewCreateRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        return await create_master_review(
+            session,
+            viewer=user,
+            order_id=order_id,
+            rating=body.rating,
+            headline=body.headline,
+            body=body.body,
+            is_public=body.is_public,
+        )
+    except ValidationError as exc:
+        raise HTTPException(400, exc.message) from exc
+    except ConflictError as exc:
+        raise HTTPException(409, exc.message) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(403, exc.message) from exc
+    except NotFoundError as exc:
+        raise HTTPException(404, exc.message) from exc
 
 
 @router.post("/orders/{order_id}/assign-self")
