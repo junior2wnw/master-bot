@@ -590,6 +590,11 @@ select:focus-visible {
   padding: 24px;
 }
 
+.launch-gate {
+  width: min(560px, 100%);
+  text-align: left;
+}
+
 .loader-orb {
   width: 52px;
   height: 52px;

@@ -25,6 +25,11 @@ export interface BridgeContext {
   embedded: boolean;
 }
 
+function isLocalDevHost(): boolean {
+  const host = window.location.hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+}
+
 function readDevPayload(): string {
   const params = new URLSearchParams(window.location.search);
   const direct = params.get("dev_user");
@@ -64,6 +69,14 @@ export function resolveBridge(): BridgeContext {
       platform: "telegram",
       initData: telegramBridge?.initData ?? "",
       embedded: true,
+    };
+  }
+
+  if (!isLocalDevHost()) {
+    return {
+      platform: "max",
+      initData: "",
+      embedded: false,
     };
   }
 
