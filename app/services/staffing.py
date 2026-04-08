@@ -1,5 +1,7 @@
 """Staffing service: deactivate, suspend, terminate, transfer."""
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,8 +104,7 @@ async def approve_action(
 
     action.status = "executed"
     action.approved_by = approver.id
-    from datetime import datetime, timezone
-    action.resolved_at = datetime.now(timezone.utc)
+    action.resolved_at = datetime.now(UTC)
     await session.flush()
 
     # Execute
@@ -119,6 +120,45 @@ async def approve_action(
         action="staffing.approved",
         entity_type="staffing_action",
         entity_id=action.id,
+    )
+
+    return action
+
+
+async def reject_action(
+    session: AsyncSession,
+    *,
+    action_id: int,
+    approver: User,
+    reason: str | None = None,
+) -> StaffingAction:
+    """Admin rejects a pending staffing action without applying it."""
+    if not has_role(approver, Role.ADMIN) and not has_role(approver, Role.PRODUCT_OWNER):
+        raise PermissionDenied("Только админ может отклонять кадровые действия")
+
+    result = await session.execute(
+        select(StaffingAction).where(StaffingAction.id == action_id)
+    )
+    action = result.scalar_one_or_none()
+    if not action or action.status != "pending":
+        raise ValidationError("Действие не найдено или уже обработано")
+
+    action.status = "rejected"
+    action.approved_by = approver.id
+    action.resolved_at = datetime.now(UTC)
+    metadata = dict(action.metadata_ or {})
+    if reason:
+        metadata["rejection_reason"] = reason
+        action.metadata_ = metadata
+    await session.flush()
+
+    await log_audit(
+        session,
+        user_id=approver.id,
+        action="staffing.rejected",
+        entity_type="staffing_action",
+        entity_id=action.id,
+        new_value={"reason": reason or ""},
     )
 
     return action

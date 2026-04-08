@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { api, ApiError } from "./api";
 import { prepareBridge, resolveBridge } from "./bridge";
+import { ControlCenterPanel } from "./ControlCenterPanel";
 import { useWorkspaceStore } from "./store";
 import type {
   BootstrapResponse,
@@ -2326,6 +2327,8 @@ function Shell({ auth, bootstrap }: { auth: { telegram_id: number; name: string 
       case "admin_panel":
       case "owner_panel":
       case "adm_flags":
+        focusPanelByCallback("top", "control-center");
+        return;
       case "own_finance":
       case "own_funnel":
       case "own_masters":
@@ -2333,8 +2336,7 @@ function Shell({ auth, bootstrap }: { auth: { telegram_id: number; name: string 
       case "own_discounts":
       case "own_settings":
       case "adm_audit":
-        focusPanelByCallback("top", "workspace-overview");
-        setCommandOpen(true);
+        focusPanelByCallback("top", "control-center");
         return;
       default:
         focusPanelByCallback("top", "workspace-overview");
@@ -2387,6 +2389,8 @@ function Shell({ auth, bootstrap }: { auth: { telegram_id: number; name: string 
             canPublishMasterProfile={bootState.capabilities.can_publish_master_profile}
           />
         );
+      case "control-center":
+        return <ControlCenterPanel externalUserId={externalUserId} />;
       case "approvals-queue":
         return <ApprovalsPanel externalUserId={externalUserId} />;
       case "analytics-overview":

@@ -1,7 +1,7 @@
 """Invite service: generate, validate, activate invite codes."""
 
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +35,9 @@ async def create_invite(
         raise ValidationError("Модуль инвайтов отключён")
 
     # Permission checks
-    if has_role(creator, Role.SENIOR_MASTER):
+    if has_role(creator, Role.ADMIN) or has_role(creator, Role.PRODUCT_OWNER):
+        pass
+    elif has_role(creator, Role.SENIOR_MASTER):
         # Senior master can only invite masters into their branch
         if role_code != Role.MASTER.value:
             raise PermissionDenied("Старший мастер может приглашать только мастеров")
@@ -47,12 +49,12 @@ async def create_invite(
             select(BranchMember).where(
                 BranchMember.user_id == creator.id,
                 BranchMember.branch_id == branch_id,
-                BranchMember.is_senior == True,
+                BranchMember.is_senior,
             )
         )
         if not result.scalar_one_or_none():
             raise PermissionDenied("Вы не являетесь старшим мастером этой ветки")
-    elif not has_role(creator, Role.ADMIN) and not has_role(creator, Role.PRODUCT_OWNER):
+    else:
         raise PermissionDenied("Недостаточно прав для создания инвайтов")
 
     code = generate_code()
@@ -89,7 +91,7 @@ async def activate_invite(
 ) -> InviteActivation:
     """Activate an invite code for a user."""
     result = await session.execute(
-        select(Invite).where(Invite.code == code, Invite.is_active == True)
+        select(Invite).where(Invite.code == code, Invite.is_active)
     )
     invite = result.scalar_one_or_none()
 

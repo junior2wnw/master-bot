@@ -88,6 +88,14 @@ PANEL_DEFINITIONS = (
         "visibility": "all",
     },
     {
+        "id": "control-center",
+        "title": "РљРѕРЅС‚СѓСЂ",
+        "subtitle": "РљРѕРјР°РЅРґР°, РёРЅРІР°Р№С‚С‹, РјРѕРґРµСЂР°С†РёСЏ Рё С„Р»Р°РіРё",
+        "group": "control",
+        "icon": "spark",
+        "visibility": "ops",
+    },
+    {
         "id": "approvals-queue",
         "title": "Согласования",
         "subtitle": "Очередь скидок и решений по доступам",
@@ -129,9 +137,9 @@ PRESET_DEFINITIONS = (
         "title": "Контроль",
         "subtitle": "Управление, approvals и обзор платформы",
         "default_ratio": 48,
-        "top_panel": "analytics-overview",
+        "top_panel": "control-center",
         "bottom_panel": "approvals-queue",
-        "visibility": "admin",
+        "visibility": "ops",
     },
 )
 
@@ -160,9 +168,24 @@ def _can_process_approvals(user: User) -> bool:
     return has_permission(user, Permission.DISCOUNT_APPROVE_BRANCH)
 
 
+def _can_view_ops(user: User) -> bool:
+    return any(
+        (
+            _can_view_control(user),
+            has_permission(user, Permission.INVITE_CREATE),
+            has_permission(user, Permission.INVITE_MODERATE),
+            has_permission(user, Permission.STAFFING_INITIATE_BRANCH),
+            has_permission(user, Permission.STAFFING_APPROVE),
+            has_role(user, Role.SENIOR_MASTER),
+        )
+    )
+
+
 def _panel_is_visible(user: User, visibility: str) -> bool:
     if visibility == "all":
         return True
+    if visibility == "ops":
+        return _can_view_ops(user)
     if visibility == "approver":
         return has_permission(user, Permission.DISCOUNT_APPROVE_BRANCH)
     if visibility == "admin":

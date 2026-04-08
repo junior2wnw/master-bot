@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.api.control import router as control_router
 from app.api.admin import router as admin_router
 from app.api.health import router as health_router
 from app.api.max_webhook import router as max_webhook_router
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(admin_router)
+    app.include_router(control_router)
     app.include_router(max_webhook_router)
     app.include_router(v1_router)
     app.include_router(superapp_router)

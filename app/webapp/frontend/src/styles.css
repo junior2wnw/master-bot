@@ -556,6 +556,33 @@ select:focus-visible {
   gap: 10px;
 }
 
+.control-tabs {
+  margin-top: 16px;
+}
+
+.control-user-card {
+  text-align: left;
+}
+
+.flag-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.flag-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+  accent-color: #95c7ff;
+}
+
+.mono-code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+
 .approval-actions {
   min-width: min(280px, 100%);
 }

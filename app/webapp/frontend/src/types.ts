@@ -289,6 +289,150 @@ export interface PublicProfileResponse extends MasterCard {
   };
 }
 
+export interface ControlBranch {
+  id: number;
+  name: string;
+  is_active: boolean;
+  senior_master_id: number | null;
+  member_count: number;
+}
+
+export interface ControlUser {
+  user_id: number;
+  external_user_id: number;
+  name: string;
+  username: string | null;
+  roles: string[];
+  active_role_label: string;
+  max_role_label: string;
+  is_active: boolean;
+  branches: Array<{
+    id: number;
+    name: string;
+    is_senior: boolean;
+    is_active: boolean;
+  }>;
+  can_manage: boolean;
+}
+
+export interface ControlInvite {
+  id: number;
+  code: string;
+  role_code: string;
+  branch_id: number | null;
+  branch_name: string | null;
+  profession_id: number | null;
+  max_uses: number;
+  used_count: number;
+  requires_approval: boolean;
+  expires_at: string | null;
+  is_active: boolean;
+  is_exhausted: boolean;
+  is_expired: boolean;
+  created_at: string | null;
+  creator: {
+    id: number;
+    name: string;
+    external_user_id: number;
+  } | null;
+}
+
+export interface ControlInviteActivation {
+  id: number;
+  status: string;
+  activated_at: string | null;
+  invite: {
+    id: number;
+    code: string;
+    role_code: string;
+    branch_name: string | null;
+    requires_approval: boolean;
+  } | null;
+  user: {
+    id: number;
+    name: string;
+    external_user_id: number;
+  } | null;
+  approver: {
+    id: number;
+    name: string;
+    external_user_id: number;
+  } | null;
+}
+
+export interface ControlStaffingAction {
+  id: number;
+  action_type: string;
+  status: string;
+  status_label: string;
+  reason: string;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+  resolved_at: string | null;
+  target: {
+    id: number;
+    name: string;
+    external_user_id: number;
+  } | null;
+  initiator: {
+    id: number;
+    name: string;
+    external_user_id: number;
+  } | null;
+  approver: {
+    id: number;
+    name: string;
+    external_user_id: number;
+  } | null;
+}
+
+export interface ControlFeatureFlag {
+  code: string;
+  name: string;
+  description: string | null;
+  module: string | null;
+  enabled: boolean;
+}
+
+export interface ControlListMeta {
+  limit: number;
+  offset: number;
+  count: number;
+}
+
+export interface ControlBootstrapResponse {
+  capabilities: {
+    can_view_team: boolean;
+    can_create_invites: boolean;
+    can_moderate_invites: boolean;
+    can_initiate_staffing: boolean;
+    can_approve_staffing: boolean;
+    can_manage_flags: boolean;
+  };
+  ui: {
+    invite_role_options: RoleOption[];
+    staffing_action_options: RoleOption[];
+  };
+  branches: ControlBranch[];
+  users: {
+    items: ControlUser[];
+    meta: ControlListMeta;
+  };
+  invites: {
+    items: ControlInvite[];
+    meta: ControlListMeta;
+  };
+  invite_activations: {
+    items: ControlInviteActivation[];
+    meta: ControlListMeta;
+  };
+  staffing: {
+    items: ControlStaffingAction[];
+    meta: ControlListMeta;
+  };
+  flags: ControlFeatureFlag[];
+}
+
 export interface ApprovalItem {
   id: number;
   estimate_id: number;

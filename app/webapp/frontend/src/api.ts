@@ -5,6 +5,8 @@ import type {
   BoardResponse,
   BootstrapResponse,
   CatalogItem,
+  ControlBootstrapResponse,
+  ControlFeatureFlag,
   EstimateDetail,
   EstimateQrPayload,
   EstimateSummary,
@@ -352,5 +354,57 @@ export const api = {
   },
   getAnalytics(externalUserId: number) {
     return request<AnalyticsOverview>("/analytics/overview");
+  },
+  getControlBootstrap(externalUserId: number) {
+    return request<ControlBootstrapResponse>("/control/bootstrap");
+  },
+  listControlUsers(
+    externalUserId: number,
+    params?: Record<string, string | number | boolean | undefined>,
+  ) {
+    return request<ControlBootstrapResponse["users"]>("/control/users", {
+      params,
+    });
+  },
+  createControlInvite(externalUserId: number, body: Record<string, unknown>) {
+    return request<ControlBootstrapResponse["invites"]["items"][number]>("/control/invites", {
+      method: "POST",
+      body,
+    });
+  },
+  moderateControlInviteActivation(
+    externalUserId: number,
+    activationId: number,
+    action: "approve" | "reject",
+  ) {
+    return request<ControlBootstrapResponse["invite_activations"]["items"][number]>(
+      `/control/invite-activations/${activationId}`,
+      {
+        method: "POST",
+        body: { action },
+      },
+    );
+  },
+  createControlStaffingAction(externalUserId: number, body: Record<string, unknown>) {
+    return request<ControlBootstrapResponse["staffing"]["items"][number]>("/control/staffing", {
+      method: "POST",
+      body,
+    });
+  },
+  moderateControlStaffingAction(
+    externalUserId: number,
+    actionId: number,
+    body: { action: "approve" | "reject"; comment?: string | null },
+  ) {
+    return request<ControlBootstrapResponse["staffing"]["items"][number]>(`/control/staffing/${actionId}`, {
+      method: "POST",
+      body,
+    });
+  },
+  toggleControlFlag(externalUserId: number, code: string, enabled: boolean) {
+    return request<ControlFeatureFlag>(`/control/flags/${code}`, {
+      method: "PATCH",
+      body: { enabled },
+    });
   },
 };
