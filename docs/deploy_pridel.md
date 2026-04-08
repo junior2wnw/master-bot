@@ -5,8 +5,15 @@
 - alias: `pridel`
 - адрес: `193.47.43.64`
 - пользователь: `root`
-- публичный Mini App URL: `https://193.47.43.64.sslip.io/app`
+- публичный Mini App URL: `https://4-2.рф/app`
+- ASCII / punycode для серверных конфигов: `4-2.xn--p1ai`
 - DNS A-record для боевого домена должен указывать на `193.47.43.64`
+
+Важно:
+
+- для пользователя и в MAX можно показывать `4-2.рф`
+- для `Caddyfile`, `curl`, сертификатов и server-side конфигов используйте только `4-2.xn--p1ai`
+- не прописывайте `4-2.рф` и `4-2.xn--p1ai` одновременно в одном host-list Caddy: он нормализует IDN и воспримет это как дубликат
 
 ## Один раз настроить доступ
 
@@ -57,7 +64,7 @@ curl -H "Authorization: $MAX_BOT_TOKEN" https://platform-api.max.ru/me
 cd /opt/pridel
 sudo bash deploy/setup.sh \
   --max-bot-token "$MAX_BOT_TOKEN" \
-  --webapp-url "https://193.47.43.64.sslip.io/app"
+  --webapp-url "https://4-2.xn--p1ai/app"
 ```
 
 Если после первого деплоя меняете `MAX_BOT_TOKEN`, `WEBAPP_URL` или другие значения в `/opt/pridel/.env`, обычного `docker compose restart app` недостаточно: нужно пересоздать контейнер, чтобы Docker заново подхватил env:
@@ -91,10 +98,10 @@ docker compose up -d --build --force-recreate app
 
 ## HTTPS reverse proxy
 
-Для `sslip.io` используется контейнер Caddy. Рабочая конфигурация:
+Для боевого домена используется контейнер Caddy. Рабочая конфигурация:
 
 ```caddyfile
-193.47.43.64.sslip.io {
+4-2.xn--p1ai {
     encode gzip zstd
     reverse_proxy pridel-app-1:8000
 }
@@ -119,9 +126,9 @@ docker run -d \
 ## Проверки после деплоя
 
 ```bash
-curl https://193.47.43.64.sslip.io/health
-curl https://193.47.43.64.sslip.io/ready
-curl -I https://193.47.43.64.sslip.io/app/
+curl https://4-2.xn--p1ai/health
+curl https://4-2.xn--p1ai/ready
+curl -I https://4-2.xn--p1ai/app/
 ssh pridel "cd /opt/pridel && docker compose logs --tail 100 app"
 ```
 
@@ -141,4 +148,4 @@ ssh pridel "cd /opt/pridel && docker compose logs --tail 100 app"
 - Mini App не открывается в MAX:
   Обычно причина в отсутствии публичного `https` URL или в пустом `WEBAPP_URL`.
 - Сертификат не выпускается:
-  Проверьте, что `193.47.43.64.sslip.io` резолвится в сервер, и открыты порты `80` и `443`.
+  Проверьте, что `4-2.xn--p1ai` резолвится в `193.47.43.64`, и открыты порты `80` и `443`.

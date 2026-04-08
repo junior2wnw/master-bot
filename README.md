@@ -1,6 +1,6 @@
 # ПриДел
 
-> Платформа услуг для мастеров с ботом и мини-приложением в MAX.
+> Продукт компании `4-2`: платформа услуг для мастеров с ботом и мини-приложением в MAX.
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -9,6 +9,12 @@
 ## Что это
 
 ПриДел помогает вести полный цикл сервисных работ: каталог услуг, сметы, заказы, согласования, оплаты, уведомления и роли команды.
+
+Брендовая схема проекта:
+
+- `4-2` — компания и домен
+- `ПриДел` — продукт и главное имя в интерфейсе
+- `pridel` / `придел` — допустимые технические slug-формы, но не основной display-бренд
 
 Основной сценарий запуска:
 
@@ -88,7 +94,10 @@ MAX Bot / Mini App -> FastAPI -> Services -> SQLAlchemy models -> PostgreSQL
 - `WEBAPP_URL` — публичный URL мини-приложения
 - `WEBAPP_SESSION_TTL_SEC` — срок жизни подписанной web-сессии Mini App
 - `OWNER_TELEGRAM_ID` — историческое имя переменной для внешнего ID владельца; в MAX сюда ставится `user_id` пользователя MAX
+- `PLATFORM_OPERATOR_NAME` — оператор и компания продукта, по умолчанию `4-2`
 - `PLATFORM_NAME` — пользовательское имя платформы, по умолчанию `ПриДел`
+- `PLATFORM_PUBLIC_DOMAIN` — человекочитаемый домен продукта, по умолчанию `4-2.рф`
+- `PLATFORM_PUBLIC_DOMAIN_ASCII` — punycode-форма домена для server/proxy/TLS-конфигов, по умолчанию `4-2.xn--p1ai`
 
 Полный шаблон смотрите в `.env.example`.
 
@@ -125,7 +134,9 @@ docker compose up -d --force-recreate app
 Подробный production-процесс для боевого сервера `pridel`:
 
 - alias `pridel` указывает на `root@193.47.43.64`
-- Mini App сейчас поднимается через `https://193.47.43.64.sslip.io/app`
+- публичный домен продукта: `https://4-2.рф/app`
+- технический ASCII-домен для конфигов и reverse proxy: `https://4-2.xn--p1ai/app`
+- в Caddy, curl, cert/TLS и server-side конфигурациях используйте только `4-2.xn--p1ai`: Caddy нормализует `4-2.рф` в тот же host и считает двойную запись дубликатом
 - отдельная инструкция лежит в [docs/deploy_pridel.md](docs/deploy_pridel.md)
 
 ## Разработка

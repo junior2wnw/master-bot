@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# ПриДел — Turnkey Deployment Script for Ubuntu 20.04 / 22.04 / 24.04
+# 4-2 / ПриДел — Turnkey Deployment Script for Ubuntu 20.04 / 22.04 / 24.04
 # ============================================================================
 #
 # Что делает:
@@ -173,7 +173,7 @@ fi
 
 cat > .env <<ENVEOF
 # ============================================================================
-# ПриДел — Environment Configuration
+# 4-2 / ПриДел — Environment Configuration
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # ============================================================================
 
@@ -202,7 +202,10 @@ APP_HOST=0.0.0.0
 APP_PORT=${APP_PORT}
 
 # Platform
+PLATFORM_OPERATOR_NAME=4-2
 PLATFORM_NAME=ПриДел
+PLATFORM_PUBLIC_DOMAIN=4-2.рф
+PLATFORM_PUBLIC_DOMAIN_ASCII=4-2.xn--p1ai
 PLATFORM_FEE_PCT=20.0
 SENIOR_MASTER_SHARE_PCT=5.0
 ADMIN_SHARE_PCT=5.0
@@ -354,7 +357,7 @@ if [[ "$SKIP_SYSTEMD" == "false" ]]; then
 
     cat > /etc/systemd/system/masterbot.service <<SVCEOF
 [Unit]
-Description=ПриДел - Service Master Platform
+Description=4-2 / ПриДел - Service Master Platform
 After=docker.service
 Requires=docker.service
 
@@ -409,7 +412,7 @@ log "Ротация логов настроена (14 дней)"
 # === Summary ===
 header "ГОТОВО!"
 
-echo -e "${BOLD}ПриДел успешно развёрнут!${NC}"
+echo -e "${BOLD}4-2 / ПриДел успешно развёрнут!${NC}"
 echo ""
 echo -e "  API:        http://localhost:${APP_PORT}"
 echo -e "  Health:     http://localhost:${APP_PORT}/health"

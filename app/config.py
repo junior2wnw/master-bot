@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # Platform
+    platform_operator_name: str = "4-2"
     platform_name: str = "ПриДел"
+    platform_public_domain: str = "4-2.рф"
+    platform_public_domain_ascii: str = "4-2.xn--p1ai"
     platform_fee_pct: Decimal = Decimal("20.0")
     senior_master_share_pct: Decimal = Decimal("5.0")
     admin_share_pct: Decimal = Decimal("5.0")
