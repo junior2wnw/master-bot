@@ -6,14 +6,18 @@ import type {
   BootstrapResponse,
   CatalogItem,
   EstimateDetail,
+  EstimateQrPayload,
   EstimateSummary,
   JobPost,
   LayoutPayload,
   NetworkResponse,
   NotificationItem,
+  OrderDetail,
+  OrderPaymentInfo,
   OrderSummary,
   ProfileResponse,
   PublicProfileResponse,
+  RoleModeResponse,
 } from "./types";
 import { resolveBridge } from "./bridge";
 
@@ -85,7 +89,7 @@ function buildUrl(path: string, params?: Record<string, string | number | boolea
 async function request<T>(
   path: string,
   options: {
-    method?: "GET" | "POST" | "PUT" | "PATCH";
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     body?: unknown;
     params?: Record<string, string | number | boolean | undefined>;
   } = {},
@@ -114,6 +118,40 @@ async function request<T>(
   }
 
   return (await response.json()) as T;
+}
+
+async function requestBlob(
+  path: string,
+  options: {
+    params?: Record<string, string | number | boolean | undefined>;
+  } = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const session = readStoredSession();
+  const response = await fetch(buildUrl(path, options.params), {
+    headers: {
+      ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    let message = "Не удалось получить файл";
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload?.detail) {
+        message = payload.detail;
+      }
+    } catch {
+      // ignore
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  const disposition = response.headers.get("content-disposition") || "";
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+  return {
+    blob: await response.blob(),
+    filename: filenameMatch?.[1] || "download.bin",
+  };
 }
 
 export const api = {
@@ -179,6 +217,15 @@ export const api = {
       body,
     });
   },
+  getRoleMode(externalUserId: number) {
+    return request<RoleModeResponse>("/profile/role-mode");
+  },
+  setRoleMode(externalUserId: number, roleCode: string | null) {
+    return request<RoleModeResponse>("/profile/role-mode", {
+      method: "PUT",
+      body: { role_code: roleCode },
+    });
+  },
   searchCatalog(externalUserId: number, query: string) {
     return request<CatalogItem[]>("/catalog/search", {
       params: { q: query },
@@ -204,8 +251,78 @@ export const api = {
       },
     });
   },
+  updateEstimateItem(externalUserId: number, estimateId: number, lineItemId: number, quantity: number) {
+    return request<{ id: number; quantity: number; subtotal: number }>(
+      `/estimates/${estimateId}/items/${lineItemId}`,
+      {
+        method: "PATCH",
+        body: { quantity },
+      },
+    );
+  },
+  deleteEstimateItem(externalUserId: number, estimateId: number, lineItemId: number) {
+    return request<{ ok: boolean }>(`/estimates/${estimateId}/items/${lineItemId}`, {
+      method: "DELETE",
+    });
+  },
+  deleteEstimate(externalUserId: number, estimateId: number) {
+    return request<{ ok: boolean }>(`/estimates/${estimateId}`, {
+      method: "DELETE",
+    });
+  },
+  updateEstimateStatus(
+    externalUserId: number,
+    estimateId: number,
+    body: { status: string; client_external_id?: number | null },
+  ) {
+    return request<{ id: number; status: string }>(`/estimates/${estimateId}/status`, {
+      method: "POST",
+      body,
+    });
+  },
+  requestEstimateDiscount(externalUserId: number, estimateId: number, value: number) {
+    return request<{ id: number; status: string }>(`/estimates/${estimateId}/discount`, {
+      method: "POST",
+      body: { value },
+    });
+  },
+  downloadEstimatePdf(externalUserId: number, estimateId: number) {
+    return requestBlob(`/estimates/${estimateId}/export/pdf`);
+  },
+  downloadEstimateXlsx(externalUserId: number, estimateId: number) {
+    return requestBlob(`/estimates/${estimateId}/export/xlsx`);
+  },
+  getEstimateQr(externalUserId: number, estimateId: number) {
+    return request<EstimateQrPayload>(`/estimates/${estimateId}/qr`);
+  },
   listOrders(externalUserId: number) {
     return request<OrderSummary[]>("/orders");
+  },
+  createOrder(
+    externalUserId: number,
+    body: { estimate_id: number; address: string; urgency?: string; notes?: string | null },
+  ) {
+    return request<{ id: number; status: string }>("/orders", {
+      method: "POST",
+      body,
+    });
+  },
+  getOrder(externalUserId: number, orderId: number) {
+    return request<OrderDetail>(`/orders/${orderId}`);
+  },
+  updateOrderStatus(externalUserId: number, orderId: number, body: { status: string; reason?: string | null }) {
+    return request<{ id: number; status: string }>(`/orders/${orderId}/status`, {
+      method: "POST",
+      body,
+    });
+  },
+  assignOrderToSelf(externalUserId: number, orderId: number) {
+    return request<{ id: number; status: string; master_id: number }>(`/orders/${orderId}/assign-self`, {
+      method: "POST",
+    });
+  },
+  getOrderPayment(externalUserId: number, orderId: number) {
+    return request<OrderPaymentInfo>(`/orders/${orderId}/payment`);
   },
   listNotifications(externalUserId: number) {
     return request<NotificationItem[]>("/notifications");
@@ -226,6 +343,12 @@ export const api = {
   },
   listApprovals(externalUserId: number) {
     return request<ApprovalItem[]>("/approvals");
+  },
+  processApproval(externalUserId: number, requestId: number, action: "approve" | "reject", comment?: string) {
+    return request<{ ok: boolean }>(`/approvals/${requestId}`, {
+      method: "POST",
+      body: { action, comment },
+    });
   },
   getAnalytics(externalUserId: number) {
     return request<AnalyticsOverview>("/analytics/overview");

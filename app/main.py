@@ -11,11 +11,13 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.admin import router as admin_router
 from app.api.health import router as health_router
+from app.api.max_webhook import router as max_webhook_router
 from app.api.superapp import router as superapp_router
 from app.api.v1 import router as v1_router
 from app.config import get_settings
 from app.core.module_registry import load_flags, load_settings
 from app.database import get_async_session
+from app.max_bot.app import ensure_max_runtime, get_max_delivery_mode, shutdown_max_runtime
 from app.services.notification_dispatcher import (
     notification_worker,
     set_bot,
@@ -64,6 +66,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(admin_router)
+    app.include_router(max_webhook_router)
     app.include_router(v1_router)
     app.include_router(superapp_router)
 
@@ -87,6 +90,17 @@ def create_app() -> FastAPI:
                     "Startup preload skipped: flags/settings are not available yet",
                 )
 
+        if settings.max_bot_token and get_max_delivery_mode(settings) == "webhook":
+            try:
+                await ensure_max_runtime(sync_webhook=True)
+            except Exception:
+                logging.getLogger(__name__).exception("Failed to initialize MAX webhook runtime")
+
+    @app.on_event("shutdown")
+    async def shutdown() -> None:
+        if settings.max_bot_token and get_max_delivery_mode(settings) == "webhook":
+            await shutdown_max_runtime()
+
     return app
 
 
@@ -109,7 +123,7 @@ async def start_telegram_bot() -> None:
 
 
 async def start_max_bot() -> None:
-    """Start MAX bot long polling."""
+    """Start MAX bot runtime in webhook or polling mode."""
     settings = get_settings()
     if not settings.max_bot_token:
         logging.getLogger(__name__).warning("MAX_BOT_TOKEN not set, skipping MAX bot")

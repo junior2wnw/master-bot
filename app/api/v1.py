@@ -496,6 +496,7 @@ async def delete_estimate_api(
 class EstimateStatusRequest(BaseModel):
     status: str
     client_user_id: int | None = None
+    client_external_id: int | None = None
     client_telegram_id: int | None = None
 
 
@@ -510,7 +511,7 @@ async def update_estimate_status_api(
     estimate = await _load_estimate_entity(session, estimate_id)
 
     # If linking client
-    client_user_id = body.client_user_id or body.client_telegram_id
+    client_user_id = body.client_user_id or body.client_external_id or body.client_telegram_id
     if client_user_id:
         if not can_send_estimate_to_client(user, estimate):
             raise HTTPException(403, "Access denied")
@@ -522,8 +523,11 @@ async def update_estimate_status_api(
         estimate.client_id = client.id
         await session.flush()
 
-    if body.status == "client_review" and not can_send_estimate_to_client(user, estimate):
-        raise HTTPException(403, "Access denied")
+    if body.status == "client_review":
+        if not can_send_estimate_to_client(user, estimate):
+            raise HTTPException(403, "Access denied")
+        if not estimate.client_id and not client_user_id:
+            raise HTTPException(400, "Укажите ID клиента в MAX перед отправкой сметы")
     if body.status in {"approved", "draft"} and not can_respond_to_estimate(user, estimate):
         raise HTTPException(403, "Access denied")
 
@@ -614,6 +618,7 @@ async def create_order(
         address=body.address,
         urgency=body.urgency,
         notes=body.notes,
+        source_channel="max_miniapp",
     )
     return {"id": order.id, "status": order.status}
 

@@ -39,6 +39,10 @@ header() { echo -e "\n${CYAN}${BOLD}=== $1 ===${NC}\n"; }
 
 # === Parse arguments ===
 MAX_BOT_TOKEN=""
+MAX_DELIVERY_MODE="auto"
+MAX_WEBHOOK_URL=""
+MAX_WEBHOOK_PATH="/api/max/webhook"
+MAX_WEBHOOK_SECRET=""
 WEBAPP_URL=""
 SKIP_FIREWALL=false
 SKIP_SYSTEMD=false
@@ -49,6 +53,10 @@ APP_PORT=8000
 while [[ $# -gt 0 ]]; do
     case $1 in
         --max-bot-token|--bot-token) MAX_BOT_TOKEN="$2"; shift 2 ;;
+        --max-delivery-mode) MAX_DELIVERY_MODE="$2"; shift 2 ;;
+        --max-webhook-url) MAX_WEBHOOK_URL="$2"; shift 2 ;;
+        --max-webhook-path) MAX_WEBHOOK_PATH="$2"; shift 2 ;;
+        --max-webhook-secret) MAX_WEBHOOK_SECRET="$2"; shift 2 ;;
         --webapp-url)   WEBAPP_URL="$2"; shift 2 ;;
         --domain)        DOMAIN="$2"; shift 2 ;;
         --port)          APP_PORT="$2"; shift 2 ;;
@@ -60,6 +68,10 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --max-bot-token TOKEN   MAX Bot Token (or set later in .env)"
+            echo "  --max-delivery-mode MODE  MAX delivery mode: auto | webhook | polling"
+            echo "  --max-webhook-url URL     Explicit webhook URL override"
+            echo "  --max-webhook-path PATH   Webhook path when URL is derived from WEBAPP_URL"
+            echo "  --max-webhook-secret KEY  Shared secret for MAX webhook validation"
             echo "  --webapp-url URL        Public HTTPS URL for Mini App"
             echo "  --domain DOMAIN     Domain name for nginx (optional)"
             echo "  --port PORT         App port (default: 8000)"
@@ -71,6 +83,14 @@ while [[ $# -gt 0 ]]; do
         *) err "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+case "${MAX_DELIVERY_MODE}" in
+    auto|webhook|polling) ;;
+    *)
+        err "MAX delivery mode must be one of: auto, webhook, polling"
+        exit 1
+        ;;
+esac
 
 # === Preflight checks ===
 header "Preflight Checks"
@@ -165,6 +185,9 @@ generate_secret() {
 DB_PASSWORD=$(generate_secret 24)
 REDIS_PASSWORD=$(generate_secret 24)
 APP_SECRET=$(generate_secret 48)
+if [[ -z "$MAX_WEBHOOK_SECRET" ]]; then
+    MAX_WEBHOOK_SECRET=$(generate_secret 32)
+fi
 
 if [[ -f .env ]]; then
     warn ".env уже существует — создаём бэкап .env.bak"
@@ -181,6 +204,10 @@ cat > .env <<ENVEOF
 MAX_BOT_TOKEN=${MAX_BOT_TOKEN}
 MAX_API_BASE_URL=https://platform-api.max.ru
 MAX_POLLING_TIMEOUT_SEC=30
+MAX_DELIVERY_MODE=${MAX_DELIVERY_MODE}
+MAX_WEBHOOK_URL=${MAX_WEBHOOK_URL}
+MAX_WEBHOOK_PATH=${MAX_WEBHOOK_PATH}
+MAX_WEBHOOK_SECRET=${MAX_WEBHOOK_SECRET}
 WEBAPP_URL=${WEBAPP_URL}
 
 # Database
@@ -243,6 +270,14 @@ fi
 
 if [[ -z "$WEBAPP_URL" ]]; then
     warn "WEBAPP_URL не задан. Mini App в MAX не откроется, пока не укажете публичный HTTPS URL."
+fi
+
+if [[ "$MAX_DELIVERY_MODE" == "webhook" && -z "$MAX_WEBHOOK_URL" && -z "$WEBAPP_URL" ]]; then
+    warn "Webhook mode выбран, но ни MAX_WEBHOOK_URL, ни WEBAPP_URL не заданы. Подписка MAX не сможет синхронизироваться."
+fi
+
+if [[ "$MAX_DELIVERY_MODE" == "auto" ]]; then
+    log "MAX delivery mode: auto (production выберет webhook при наличии публичного HTTPS URL, иначе останется polling fallback)"
 fi
 
 # === Update docker-compose for production (password-protected Redis) ===
@@ -418,6 +453,12 @@ echo -e "  API:        http://localhost:${APP_PORT}"
 echo -e "  Health:     http://localhost:${APP_PORT}/health"
 echo -e "  Ready:      http://localhost:${APP_PORT}/ready"
 echo -e "  Docs:       http://localhost:${APP_PORT}/docs (только в dev)"
+echo -e "  MAX mode:   ${MAX_DELIVERY_MODE}"
+if [[ -n "$MAX_WEBHOOK_URL" ]]; then
+    echo -e "  Webhook:    ${MAX_WEBHOOK_URL}"
+elif [[ -n "$WEBAPP_URL" ]]; then
+    echo -e "  Webhook:    ${WEBAPP_URL%/app}${MAX_WEBHOOK_PATH}"
+fi
 echo ""
 echo -e "  Проект:     ${PROJECT_DIR}"
 echo -e "  .env:       ${PROJECT_DIR}/.env"

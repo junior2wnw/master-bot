@@ -54,6 +54,26 @@ class MaxBotAPI:
         response = await self._client.get("/updates", params=params)
         return self._unwrap_response(response)
 
+    async def get_subscriptions(self) -> dict[str, Any]:
+        response = await self._client.get("/subscriptions")
+        return self._unwrap_response(response)
+
+    async def create_subscription(
+        self,
+        *,
+        url: str,
+        update_types: list[str] | None = None,
+        secret: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"url": url}
+        if update_types:
+            body["update_types"] = update_types
+        if secret:
+            body["secret"] = secret
+
+        response = await self._client.post("/subscriptions", json=body)
+        return self._unwrap_response(response)
+
     async def send_message(
         self,
         *,

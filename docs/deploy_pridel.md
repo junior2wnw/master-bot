@@ -67,12 +67,25 @@ sudo bash deploy/setup.sh \
   --webapp-url "https://4-2.xn--p1ai/app"
 ```
 
+Опционально для webhook-first production можно зафиксировать режим явно:
+
+```bash
+cd /opt/pridel
+sudo bash deploy/setup.sh \
+  --max-bot-token "$MAX_BOT_TOKEN" \
+  --webapp-url "https://4-2.xn--p1ai/app" \
+  --max-delivery-mode webhook \
+  --max-webhook-secret "$(openssl rand -hex 16)"
+```
+
 Если после первого деплоя меняете `MAX_BOT_TOKEN`, `WEBAPP_URL` или другие значения в `/opt/pridel/.env`, обычного `docker compose restart app` недостаточно: нужно пересоздать контейнер, чтобы Docker заново подхватил env:
 
 ```bash
 cd /opt/pridel
 docker compose up -d --force-recreate app
 ```
+
+То же правило обязательно для `MAX_DELIVERY_MODE`, `MAX_WEBHOOK_URL`, `MAX_WEBHOOK_PATH` и `MAX_WEBHOOK_SECRET`.
 
 Если меняется код backend или новый Mini App shell, нужен rebuild образа:
 
@@ -92,6 +105,9 @@ docker compose up -d --build --force-recreate app
 
 - на Ubuntu 22 пакет Compose может называться `docker-compose-v2`, а не `docker-compose-plugin`;
 - без `WEBAPP_URL` Mini App в MAX не откроется;
+- в production лучше оставлять `MAX_DELIVERY_MODE=auto` или `webhook`; `polling` — только fallback для dev/test;
+- если `MAX_WEBHOOK_URL` пуст, runtime строит webhook из `WEBAPP_URL` как `https://<host>/api/max/webhook`;
+- если задан `MAX_WEBHOOK_SECRET`, MAX должен присылать его в заголовке `X-Max-Bot-Api-Secret`;
 - в production Mini App API после `/api/v1/auth` ждёт `Authorization: Bearer <session>`; query auth через `?user_id=` запрещён вне dev;
 - если меняете `APP_SECRET_KEY` или `WEBAPP_SESSION_TTL_SEC`, обязателен `docker compose up -d --force-recreate app`;
 - `deploy/setup.sh` не публикует домен сам по себе, он готовит backend и инфраструктуру приложения.
@@ -129,6 +145,7 @@ docker run -d \
 curl https://4-2.xn--p1ai/health
 curl https://4-2.xn--p1ai/ready
 curl -I https://4-2.xn--p1ai/app/
+curl -i -X POST https://4-2.xn--p1ai/api/max/webhook
 ssh pridel "cd /opt/pridel && docker compose logs --tail 100 app"
 ```
 
@@ -137,6 +154,7 @@ ssh pridel "cd /opt/pridel && docker compose logs --tail 100 app"
 - `/health` отвечает `200`
 - `/ready` показывает `database=ok` и `redis=ok`
 - `/app/` отдаёт HTML Mini App
+- webhook endpoint существует и отвечает `401/403` без секрета или `200` с корректным секретом
 - в логах нет ошибок миграций и сборки
 
 ## Частые проблемы

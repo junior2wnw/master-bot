@@ -148,6 +148,18 @@ def _can_view_control(user: User) -> bool:
     return has_permission(user, Permission.ADMIN_PANEL) or has_role(user, Role.PRODUCT_OWNER)
 
 
+def _can_create_estimate(user: User) -> bool:
+    return has_permission(user, Permission.ESTIMATE_CREATE)
+
+
+def _can_create_order(user: User) -> bool:
+    return has_permission(user, Permission.ORDER_CREATE)
+
+
+def _can_process_approvals(user: User) -> bool:
+    return has_permission(user, Permission.DISCOUNT_APPROVE_BRANCH)
+
+
 def _panel_is_visible(user: User, visibility: str) -> bool:
     if visibility == "all":
         return True
@@ -1022,7 +1034,10 @@ async def build_superapp_bootstrap(
         "capabilities": {
             "can_post_jobs": True,
             "can_respond_to_jobs": _can_respond_to_board(user),
+            "can_create_estimate": _can_create_estimate(user),
+            "can_create_order": _can_create_order(user),
             "can_publish_master_profile": _can_publish_master_profile(user),
+            "can_process_approvals": _can_process_approvals(user),
             "can_view_control": _can_view_control(user),
         },
         "workspace": {

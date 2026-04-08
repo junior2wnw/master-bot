@@ -1,6 +1,24 @@
 export type Platform = "max" | "telegram";
 export type PaneId = "top" | "bottom";
 
+export interface RoleOption {
+  code: string;
+  label: string;
+}
+
+export interface RoleModeResponse {
+  direct_roles: string[];
+  roles: string[];
+  active_role: string | null;
+  active_role_label: string;
+  max_role: string | null;
+  max_role_label: string;
+  role_override: string | null;
+  is_role_switched: boolean;
+  can_switch_role: boolean;
+  available_roles: RoleOption[];
+}
+
 export interface AuthResponse {
   user_id: number;
   user_ref: number;
@@ -11,12 +29,16 @@ export interface AuthResponse {
   expires_in: number;
   expires_at: number;
   name: string;
+  is_active: boolean;
+  direct_roles: string[];
   roles: string[];
   active_role: string | null;
   active_role_label: string;
   max_role: string | null;
   max_role_label: string;
+  role_override: string | null;
   can_switch_role: boolean;
+  available_roles: RoleOption[];
 }
 
 export interface PanelMeta {
@@ -123,6 +145,8 @@ export interface EstimateSummary {
 
 export interface EstimateDetail extends EstimateSummary {
   capabilities: Record<string, boolean>;
+  created_at?: string | null;
+  updated_at?: string | null;
   items: Array<{
     id: number;
     service_item_id: number;
@@ -150,8 +174,12 @@ export interface NotificationItem {
   title: string;
   body: string;
   status: string;
+  entity_type?: string | null;
+  entity_id?: number | null;
   created_at: string | null;
   is_unread: boolean;
+  target_callback?: string | null;
+  target_label?: string | null;
 }
 
 export interface SuggestionTask {
@@ -167,7 +195,10 @@ export interface BootstrapResponse {
   capabilities: {
     can_post_jobs: boolean;
     can_respond_to_jobs: boolean;
+    can_create_estimate: boolean;
+    can_create_order: boolean;
     can_publish_master_profile: boolean;
+    can_process_approvals: boolean;
     can_view_control: boolean;
   };
   workspace: {
@@ -278,4 +309,72 @@ export interface AnalyticsOverview {
   admin_share: number;
   platform_net: number;
   funnel: Record<string, number>;
+}
+
+export interface OrderDetail {
+  id: number;
+  status: string;
+  client_id: number | null;
+  master_id: number | null;
+  address: string | null;
+  urgency: string;
+  notes: string | null;
+  cancellation_reason: string | null;
+  client_name: string | null;
+  master_name: string | null;
+  payment_status: string | null;
+  created_at: string | null;
+  capabilities: Record<string, boolean>;
+  cancel_reasons: RoleOption[];
+  estimate: {
+    id: number;
+    version: number;
+    total: number;
+    final: number;
+    items: Array<{
+      name: string;
+      quantity: number;
+      unit_price: number;
+      subtotal: number;
+    }>;
+  } | null;
+  history: Array<{
+    from: string | null;
+    to: string;
+    reason: string | null;
+    at: string | null;
+  }>;
+}
+
+export interface OrderPaymentInfo {
+  order_id: number;
+  amount: number;
+  phone: string;
+  bank_name: string;
+  recipient: string;
+  payment_status: string;
+  qr_data: string | null;
+}
+
+export interface EstimateQrPayload {
+  qr_data: string | null;
+  qr_image: string | null;
+  amount: number | null;
+  qr_mode: string;
+  has_qr: boolean;
+  has_qr_image: boolean;
+  recipient: string | null;
+  bank: string | null;
+  account: string | null;
+  bik: string | null;
+  correspondent_account: string | null;
+  card: string | null;
+  sbp_phone: string | null;
+  inn: string | null;
+  has_bank_qr: boolean;
+  has_sbp_phone_qr: boolean;
+  has_bank_qr_details: boolean;
+  has_sbp_phone_details: boolean;
+  missing_bank_fields: string[];
+  fallback_notice: string | null;
 }

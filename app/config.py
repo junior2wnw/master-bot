@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     max_bot_token: str = ""
     max_api_base_url: str = "https://platform-api.max.ru"
     max_polling_timeout_sec: int = 30
+    max_delivery_mode: str = "auto"
+    max_webhook_url: str = ""
+    max_webhook_path: str = "/api/max/webhook"
+    max_webhook_secret: str = ""
     webapp_url: str = ""  # Public HTTPS URL for Mini App, e.g. https://bot.example.com/app
 
     # Database

@@ -150,6 +150,12 @@ button {
   margin: 0;
 }
 
+.topbar-role {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -198,6 +204,26 @@ button {
 .command-btn {
   background: linear-gradient(135deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.08));
   border-color: rgba(149, 199, 255, 0.32);
+}
+
+.preset-chip:hover,
+.segment:hover,
+.btn:hover,
+.command-btn:hover,
+.dock-btn:hover,
+.quick-card:hover,
+.task-card:hover,
+.card-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(149, 199, 255, 0.28);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(149, 199, 255, 0.42);
+  outline-offset: 2px;
 }
 
 .workspace-frame {
@@ -358,6 +384,15 @@ button {
   gap: 12px;
 }
 
+.align-start {
+  align-items: flex-start;
+}
+
+.card-button {
+  width: 100%;
+  text-align: left;
+}
+
 .row-grid,
 .metric-grid,
 .quick-grid {
@@ -389,6 +424,11 @@ button {
   border-radius: var(--radius-md);
   background: var(--surface-soft);
   color: var(--text);
+}
+
+.active-card {
+  border-color: rgba(149, 199, 255, 0.32);
+  background: linear-gradient(135deg, rgba(88, 166, 255, 0.18), rgba(88, 166, 255, 0.06));
 }
 
 .metric-card span,
@@ -494,6 +534,41 @@ button {
   margin-top: 14px;
 }
 
+.qty-shell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.qty-shell span {
+  min-width: 28px;
+  text-align: center;
+}
+
+.approval-actions,
+.timeline-list,
+.role-switch-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.approval-actions {
+  min-width: min(280px, 100%);
+}
+
+.timeline-list {
+  margin-top: 6px;
+}
+
+.role-switch-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
 .toggle {
   display: flex;
   align-items: center;
@@ -547,6 +622,18 @@ button {
 .drawer {
   width: min(520px, 100%);
   justify-self: end;
+}
+
+.wide-drawer {
+  width: min(760px, 100%);
+}
+
+.qr-preview {
+  width: min(240px, 100%);
+  padding: 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 @keyframes pulse {
@@ -603,5 +690,13 @@ button {
 
   .dock {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .role-switch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wide-drawer {
+    width: 100%;
   }
 }
