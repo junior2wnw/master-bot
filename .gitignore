@@ -10,6 +10,7 @@ venv/
 dist/
 build/
 .eggs/
+node_modules/
 
 # Environment
 .env

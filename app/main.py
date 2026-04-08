@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.admin import router as admin_router
 from app.api.health import router as health_router
+from app.api.superapp import router as superapp_router
 from app.api.v1 import router as v1_router
 from app.config import get_settings
 from app.core.module_registry import load_flags, load_settings
@@ -64,11 +65,14 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(admin_router)
     app.include_router(v1_router)
+    app.include_router(superapp_router)
 
     # Serve Mini App static files
     webapp_dir = pathlib.Path(__file__).parent / "webapp"
-    if webapp_dir.exists():
-        app.mount("/app", StaticFiles(directory=str(webapp_dir), html=True), name="webapp")
+    dist_dir = webapp_dir / "dist"
+    static_dir = dist_dir if dist_dir.exists() else webapp_dir
+    if static_dir.exists():
+        app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="webapp")
 
     @app.on_event("startup")
     async def startup() -> None:

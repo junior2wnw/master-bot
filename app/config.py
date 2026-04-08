@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     app_env: str = "production"
     app_debug: bool = False
     app_secret_key: str = "change-me"
+    webapp_session_ttl_sec: int = 86400
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 

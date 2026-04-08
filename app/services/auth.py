@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.audit import log_audit
 from app.core.events import Event, event_bus
@@ -168,6 +169,13 @@ async def revoke_role(
 
 async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> User | None:
     result = await session.execute(
-        select(User).where(User.telegram_id == telegram_id)
+        select(User).options(selectinload(User.roles)).where(User.telegram_id == telegram_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
+    result = await session.execute(
+        select(User).options(selectinload(User.roles)).where(User.id == user_id)
     )
     return result.scalar_one_or_none()

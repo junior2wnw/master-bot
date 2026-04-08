@@ -364,7 +364,7 @@ RemainAfterExit=yes
 WorkingDirectory=${PROJECT_DIR}
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
-ExecReload=/usr/bin/docker compose up -d --force-recreate app
+ExecReload=/usr/bin/docker compose up -d --build --force-recreate app
 TimeoutStartSec=120
 
 [Install]
@@ -421,8 +421,10 @@ echo -e "  .env:       ${PROJECT_DIR}/.env"
 echo ""
 echo -e "${BOLD}Управление:${NC}"
 echo -e "  docker compose logs -f app    # Логи приложения"
-echo -e "  docker compose restart app    # Быстрый перезапуск без перечитки .env"
-echo -e "  docker compose up -d --force-recreate app  # Пересоздать app и подхватить новый .env"
+echo -e "  docker compose restart app    # Только перезапуск процесса без пересборки"
+echo -e "  docker compose up -d --build app  # Подтянуть новый код backend + Mini App shell"
+echo -e "  docker compose up -d --force-recreate app  # Подхватить изменённый .env без изменения кода"
+echo -e "  docker compose up -d --build --force-recreate app  # Обновить и код, и env одновременно"
 echo -e "  docker compose exec app python -m alembic upgrade head  # Миграции"
 echo -e "  docker compose exec app python -m scripts.seed          # Seed"
 echo -e "  systemctl restart masterbot   # Рестарт через systemd"

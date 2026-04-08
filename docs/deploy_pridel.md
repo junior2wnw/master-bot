@@ -6,6 +6,7 @@
 - адрес: `193.47.43.64`
 - пользователь: `root`
 - публичный Mini App URL: `https://193.47.43.64.sslip.io/app`
+- DNS A-record для боевого домена должен указывать на `193.47.43.64`
 
 ## Один раз настроить доступ
 
@@ -66,10 +67,26 @@ cd /opt/pridel
 docker compose up -d --force-recreate app
 ```
 
+Если меняется код backend или новый Mini App shell, нужен rebuild образа:
+
+```bash
+cd /opt/pridel
+docker compose up -d --build app
+```
+
+Если обновлялись и код, и env:
+
+```bash
+cd /opt/pridel
+docker compose up -d --build --force-recreate app
+```
+
 Что важно:
 
 - на Ubuntu 22 пакет Compose может называться `docker-compose-v2`, а не `docker-compose-plugin`;
 - без `WEBAPP_URL` Mini App в MAX не откроется;
+- в production Mini App API после `/api/v1/auth` ждёт `Authorization: Bearer <session>`; query auth через `?user_id=` запрещён вне dev;
+- если меняете `APP_SECRET_KEY` или `WEBAPP_SESSION_TTL_SEC`, обязателен `docker compose up -d --force-recreate app`;
 - `deploy/setup.sh` не публикует домен сам по себе, он готовит backend и инфраструктуру приложения.
 
 ## HTTPS reverse proxy

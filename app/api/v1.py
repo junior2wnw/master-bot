@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.api.shared import get_current_user
 from app.config import get_settings
 from app.core.security import (
     Role,
@@ -48,6 +49,7 @@ from app.services.profile import (
     update_profile_fields,
 )
 from app.services.role_context import build_role_context_payload, set_active_role
+from app.services.session_auth import create_session_token
 from app.services.webapp_auth import validate_webapp_init_data
 from app.services.workspace import (
     get_dashboard_data,
@@ -89,6 +91,10 @@ class AuthResponse(BaseModel):
     user_ref: int
     telegram_id: int
     platform: str
+    access_token: str
+    token_type: str
+    expires_in: int
+    expires_at: int
     name: str
     roles: list[str]
     direct_roles: list[str]
@@ -131,11 +137,20 @@ async def auth_webapp(body: AuthRequest, session: AsyncSession = Depends(get_db)
     )
 
     role_context = build_role_context_payload(user)
+    access_token, expires_at = create_session_token(
+        user_id=user.id,
+        external_user_id=user.telegram_id,
+        platform=platform,
+    )
     return AuthResponse(
         user_id=user.id,
         user_ref=user.telegram_id,
         telegram_id=user.telegram_id,
         platform=platform,
+        access_token=access_token,
+        token_type="Bearer",
+        expires_in=settings.webapp_session_ttl_sec,
+        expires_at=expires_at,
         name=user.display_name,
         roles=role_context["roles"],
         direct_roles=role_context["direct_roles"],
@@ -148,29 +163,6 @@ async def auth_webapp(body: AuthRequest, session: AsyncSession = Depends(get_db)
         can_switch_role=role_context["can_switch_role"],
         available_roles=role_context["available_roles"],
     )
-
-
-# ─── Dependency: resolve user from messenger user id ─────────
-
-async def get_current_user(
-    user_id: int | None = Query(default=None),
-    x_telegram_id: int | None = Query(default=None, alias="tg_id"),
-    session: AsyncSession = Depends(get_db),
-) -> User:
-    """Resolve user by external messenger identifier.
-
-    In production, this should use a proper JWT/session from /auth.
-    For Mini App, launch params are validated once at /auth, then the
-    external messenger user id is passed with each request.
-    """
-    external_user_id = user_id if user_id is not None else x_telegram_id
-    if external_user_id is None:
-        raise HTTPException(422, "user_id is required")
-
-    user = await get_user_by_telegram_id(session, external_user_id)
-    if not user or not user.is_active:
-        raise HTTPException(401, "User not found or inactive")
-    return user
 
 
 # ─── Catalog ─────────────────────────────────────────────────

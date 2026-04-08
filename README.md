@@ -86,6 +86,7 @@ MAX Bot / Mini App -> FastAPI -> Services -> SQLAlchemy models -> PostgreSQL
 - `MAX_API_BASE_URL` — базовый URL MAX API, по умолчанию `https://platform-api.max.ru`
 - `MAX_POLLING_TIMEOUT_SEC` — таймаут long polling
 - `WEBAPP_URL` — публичный URL мини-приложения
+- `WEBAPP_SESSION_TTL_SEC` — срок жизни подписанной web-сессии Mini App
 - `OWNER_TELEGRAM_ID` — историческое имя переменной для внешнего ID владельца; в MAX сюда ставится `user_id` пользователя MAX
 - `PLATFORM_NAME` — пользовательское имя платформы, по умолчанию `ПриДел`
 
@@ -128,6 +129,22 @@ docker compose up -d --force-recreate app
 - отдельная инструкция лежит в [docs/deploy_pridel.md](docs/deploy_pridel.md)
 
 ## Разработка
+
+- Mini App frontend source lives in `app/webapp/frontend`
+- For local non-Docker frontend build:
+
+```bash
+cd app/webapp/frontend
+npm install
+npm run build
+```
+
+- FastAPI serves `app/webapp/dist` when it exists
+- Production app image now bakes the Mini App build into Docker
+- API после `/api/v1/auth` работает через `Authorization: Bearer <session>`; legacy query auth через `?user_id=` оставлен только для dev-контура
+- After code changes, deploy with `docker compose up -d --build app`
+- If only `.env` changed, use `docker compose up -d --force-recreate app`
+- If code and `.env` changed together, use `docker compose up -d --build --force-recreate app`
 
 - `make test` — локальные тесты
 - `make lint` — линтеры
