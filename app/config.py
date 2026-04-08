@@ -7,8 +7,11 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Telegram
+    # Messenger bots
     bot_token: str = ""
+    max_bot_token: str = ""
+    max_api_base_url: str = "https://platform-api.max.ru"
+    max_polling_timeout_sec: int = 30
     webapp_url: str = ""  # Public HTTPS URL for Mini App, e.g. https://bot.example.com/app
 
     # Database
@@ -26,7 +29,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # Platform
-    platform_name: str = "МастерБот"
+    platform_name: str = "ПриДел"
     platform_fee_pct: Decimal = Decimal("20.0")
     senior_master_share_pct: Decimal = Decimal("5.0")
     admin_share_pct: Decimal = Decimal("5.0")

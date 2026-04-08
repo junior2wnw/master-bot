@@ -1,70 +1,66 @@
 # Схема базы данных
 
-## Таблицы
+## Основные таблицы
 
 ### Пользователи и роли
-- `users` — пользователи (telegram_id, имя, активность)
-- `user_roles` — роли пользователей (M2M, role_code)
+
+- `users` — пользователи платформы, внешний ID мессенджера, имя, статус
+- `user_roles` — роли пользователей
 - `branches` — ветки мастеров
 - `branch_members` — привязка пользователей к веткам
 
-### Инвайты
-- `invites` — инвайт-коды (роль, ветка, лимиты, TTL)
-- `invite_activations` — история активаций
-
 ### Каталог
-- `professions` — направления (электрика, сантехника, мебель)
-- `service_groups` — группы работ
-- `service_subgroups` — подгруппы
-- `service_items` — позиции каталога (330+ записей)
-- `shared_operations` — общие операции (48 записей)
-- `coefficients` — коэффициенты (11 записей)
+
+- `professions`
+- `service_groups`
+- `service_subgroups`
+- `service_items`
+- `shared_operations`
+- `coefficients`
 
 ### Сметы
-- `estimates` — сметы (клиент, мастер, статус)
-- `estimate_versions` — версии сметы (номер, суммы)
-- `estimate_line_items` — позиции версии (снимок цены)
-- `estimate_discounts` — скидки на версию
 
-### Скидки
-- `discount_requests` — запросы на скидку с workflow
+- `estimates`
+- `estimate_versions`
+- `estimate_line_items`
+- `estimate_discounts`
 
-### Заказы
-- `orders` — заказы
-- `order_status_history` — история статусов
+### Заказы и оплаты
 
-### Платежи
-- `payments` — записи платежей
-- `commission_policies` — политики комиссий
-- `commission_records` — рассчитанные комиссии
+- `orders`
+- `order_status_history`
+- `payments`
+- `commission_policies`
+- `commission_records`
 
-### Уведомления
-- `notification_templates` — шаблоны
-- `notifications` — очередь уведомлений
+### Уведомления и согласования
 
-### Согласования
-- `approval_requests` — универсальные согласования
+- `notification_templates`
+- `notifications`
+- `approval_requests`
+- `discount_requests`
 
-### Кадры
-- `staffing_actions` — кадровые действия
+### Служебные сущности
 
-### Аудит
-- `audit_log` — все бизнес-события
-
-### Настройки
-- `feature_flags` — флаги модулей
-- `system_settings` — системные настройки
-
-### AI
-- `prompt_templates` — шаблоны промтов
-- `ai_request_logs` — логи AI-запросов
+- `invites`
+- `invite_activations`
+- `staffing_actions`
+- `audit_log`
+- `feature_flags`
+- `system_settings`
+- `prompt_templates`
+- `ai_request_logs`
 
 ## Ключевые индексы
 
-- `users.telegram_id` — UNIQUE, lookup при каждом сообщении
-- `service_items.code` — UNIQUE, lookup при добавлении в смету
-- `service_items.search_text` — поиск по каталогу
-- `estimates.status` — фильтрация по статусу
+- `users.telegram_id` — внешний ID пользователя мессенджера; имя поля историческое
+- `service_items.code` — уникальный код каталога
+- `service_items.search_text` — полнотекстовый поиск
+- `estimates.status` — выборка по статусам
 - `discount_requests.assigned_to + status` — очередь согласований
 - `notifications.user_id + status` — очередь доставки
-- `audit_log.entity_type + entity_id` — просмотр истории сущности
+- `audit_log.entity_type + entity_id` — история сущности
+
+## Замечание по именованию
+
+Часть таблиц и колонок появилась раньше MAX-интеграции. Поэтому в схеме встречаются исторические имена вроде `telegram_id`. В текущей архитектуре это внешний ID пользователя в канале запуска, а не продуктовая привязка документации к конкретному мессенджеру.

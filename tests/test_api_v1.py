@@ -5,13 +5,11 @@ import hmac
 import json
 import time
 
-import pytest
-
 from app.api.v1 import _validate_init_data
 
 
 class TestInitDataValidation:
-    """Test Telegram WebApp initData HMAC validation."""
+    """Test signed Mini App initData HMAC validation."""
 
     def _make_init_data(self, user_data: dict, bot_token: str) -> str:
         """Generate valid initData string with correct HMAC."""
@@ -91,6 +89,31 @@ class TestInitDataValidation:
         """Empty string should return None."""
         result = _validate_init_data("", "token")
         assert result is None
+
+    def test_valid_init_data_with_extra_max_fields(self):
+        """Validation should allow MAX-style launch params beyond user/auth_date."""
+        bot_token = "123456:ABC-DEF"
+        user_json = json.dumps({"id": 67890, "first_name": "Max", "username": "maxuser"}, separators=(',', ':'))
+        auth_date = str(int(time.time()))
+        chat_json = json.dumps({"id": 12345, "type": "DIALOG"}, separators=(',', ':'))
+
+        params = {
+            "auth_date": auth_date,
+            "chat": chat_json,
+            "query_id": "test-query-id",
+            "user": user_json,
+        }
+
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+        init_data = "&".join([*(f"{k}={v}" for k, v in params.items()), f"hash={hash_value}"])
+        result = _validate_init_data(init_data, bot_token)
+
+        assert result is not None
+        assert result["id"] == 67890
+        assert result["first_name"] == "Max"
 
 
 class TestMoneyFormatting:

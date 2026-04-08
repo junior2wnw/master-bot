@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# МастерБот — Turnkey Deployment Script for Ubuntu 20.04 / 22.04 / 24.04
+# ПриДел — Turnkey Deployment Script for Ubuntu 20.04 / 22.04 / 24.04
 # ============================================================================
 #
 # Что делает:
@@ -17,7 +17,7 @@
 #
 # Использование:
 #   sudo bash deploy/setup.sh
-#   sudo bash deploy/setup.sh --bot-token YOUR_TOKEN
+#   sudo bash deploy/setup.sh --max-bot-token YOUR_TOKEN
 #   sudo bash deploy/setup.sh --skip-firewall --skip-systemd
 #
 # ============================================================================
@@ -38,7 +38,8 @@ err()    { echo -e "${RED}[✗]${NC} $1" >&2; }
 header() { echo -e "\n${CYAN}${BOLD}=== $1 ===${NC}\n"; }
 
 # === Parse arguments ===
-BOT_TOKEN=""
+MAX_BOT_TOKEN=""
+WEBAPP_URL=""
 SKIP_FIREWALL=false
 SKIP_SYSTEMD=false
 SKIP_SEED=false
@@ -47,7 +48,8 @@ APP_PORT=8000
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --bot-token)     BOT_TOKEN="$2"; shift 2 ;;
+        --max-bot-token|--bot-token) MAX_BOT_TOKEN="$2"; shift 2 ;;
+        --webapp-url)   WEBAPP_URL="$2"; shift 2 ;;
         --domain)        DOMAIN="$2"; shift 2 ;;
         --port)          APP_PORT="$2"; shift 2 ;;
         --skip-firewall) SKIP_FIREWALL=true; shift ;;
@@ -57,7 +59,8 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: sudo bash deploy/setup.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --bot-token TOKEN   Telegram Bot Token (or set later in .env)"
+            echo "  --max-bot-token TOKEN   MAX Bot Token (or set later in .env)"
+            echo "  --webapp-url URL        Public HTTPS URL for Mini App"
             echo "  --domain DOMAIN     Domain name for nginx (optional)"
             echo "  --port PORT         App port (default: 8000)"
             echo "  --skip-firewall     Don't configure UFW"
@@ -104,6 +107,19 @@ fi
 # === Install Docker ===
 header "Docker"
 
+install_compose_v2() {
+    if docker compose version &>/dev/null; then
+        return 0
+    fi
+
+    if apt-get install -y -qq docker-compose-plugin; then
+        :
+    else
+        warn "Пакет docker-compose-plugin недоступен, пробуем docker-compose-v2"
+        apt-get install -y -qq docker-compose-v2
+    fi
+}
+
 if command -v docker &>/dev/null; then
     DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)
     log "Docker уже установлен: $DOCKER_VERSION"
@@ -123,17 +139,19 @@ else
         tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     apt-get update -qq
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    apt-get install -y -qq docker-ce docker-ce-cli containerd.io
 
     systemctl enable --now docker
     log "Docker установлен: $(docker --version)"
 fi
 
+install_compose_v2
+
 # Verify docker compose v2
 if docker compose version &>/dev/null; then
     log "Docker Compose: $(docker compose version --short)"
 else
-    err "Docker Compose v2 не найден. Установите: apt install docker-compose-plugin"
+    err "Docker Compose v2 не найден. Установите docker-compose-plugin или docker-compose-v2"
     exit 1
 fi
 
@@ -155,12 +173,15 @@ fi
 
 cat > .env <<ENVEOF
 # ============================================================================
-# МастерБот — Environment Configuration
+# ПриДел — Environment Configuration
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # ============================================================================
 
-# Telegram Bot
-BOT_TOKEN=${BOT_TOKEN}
+# MAX Bot
+MAX_BOT_TOKEN=${MAX_BOT_TOKEN}
+MAX_API_BASE_URL=https://platform-api.max.ru
+MAX_POLLING_TIMEOUT_SEC=30
+WEBAPP_URL=${WEBAPP_URL}
 
 # Database
 DATABASE_URL=postgresql+asyncpg://masterbot:${DB_PASSWORD}@db:5432/masterbot
@@ -181,7 +202,7 @@ APP_HOST=0.0.0.0
 APP_PORT=${APP_PORT}
 
 # Platform
-PLATFORM_NAME=МастерБот
+PLATFORM_NAME=ПриДел
 PLATFORM_FEE_PCT=20.0
 SENIOR_MASTER_SHARE_PCT=5.0
 ADMIN_SHARE_PCT=5.0
@@ -204,7 +225,7 @@ PAYMENT_RECIPIENT_NAME=
 LOG_LEVEL=INFO
 LOG_FORMAT=json
 
-# Admin (set your Telegram IDs)
+# Admin (set external messenger IDs)
 OWNER_TELEGRAM_ID=0
 ADMIN_TELEGRAM_IDS=
 ENVEOF
@@ -212,9 +233,13 @@ ENVEOF
 chmod 600 .env
 log ".env сгенерирован (пароли: криптостойкие, права: 600)"
 
-if [[ -z "$BOT_TOKEN" ]]; then
-    warn "BOT_TOKEN не задан. Укажите его в .env перед запуском бота."
-    warn "Получите токен у @BotFather в Telegram"
+if [[ -z "$MAX_BOT_TOKEN" ]]; then
+    warn "MAX_BOT_TOKEN не задан. Укажите его в .env перед запуском бота."
+    warn "Получите токен в кабинете партнёров MAX: business.max.ru"
+fi
+
+if [[ -z "$WEBAPP_URL" ]]; then
+    warn "WEBAPP_URL не задан. Mini App в MAX не откроется, пока не укажете публичный HTTPS URL."
 fi
 
 # === Update docker-compose for production (password-protected Redis) ===
@@ -329,7 +354,7 @@ if [[ "$SKIP_SYSTEMD" == "false" ]]; then
 
     cat > /etc/systemd/system/masterbot.service <<SVCEOF
 [Unit]
-Description=МастерБот - Service Master Platform
+Description=ПриДел - Service Master Platform
 After=docker.service
 Requires=docker.service
 
@@ -339,7 +364,7 @@ RemainAfterExit=yes
 WorkingDirectory=${PROJECT_DIR}
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
-ExecReload=/usr/bin/docker compose restart
+ExecReload=/usr/bin/docker compose up -d --force-recreate app
 TimeoutStartSec=120
 
 [Install]
@@ -384,7 +409,7 @@ log "Ротация логов настроена (14 дней)"
 # === Summary ===
 header "ГОТОВО!"
 
-echo -e "${BOLD}МастерБот успешно развёрнут!${NC}"
+echo -e "${BOLD}ПриДел успешно развёрнут!${NC}"
 echo ""
 echo -e "  API:        http://localhost:${APP_PORT}"
 echo -e "  Health:     http://localhost:${APP_PORT}/health"
@@ -396,17 +421,18 @@ echo -e "  .env:       ${PROJECT_DIR}/.env"
 echo ""
 echo -e "${BOLD}Управление:${NC}"
 echo -e "  docker compose logs -f app    # Логи приложения"
-echo -e "  docker compose restart app    # Перезапуск"
+echo -e "  docker compose restart app    # Быстрый перезапуск без перечитки .env"
+echo -e "  docker compose up -d --force-recreate app  # Пересоздать app и подхватить новый .env"
 echo -e "  docker compose exec app python -m alembic upgrade head  # Миграции"
 echo -e "  docker compose exec app python -m scripts.seed          # Seed"
 echo -e "  systemctl restart masterbot   # Рестарт через systemd"
 echo ""
 
-if [[ -z "$BOT_TOKEN" ]]; then
+if [[ -z "$MAX_BOT_TOKEN" ]]; then
     echo -e "${YELLOW}${BOLD}⚠ Не забудьте:${NC}"
-    echo -e "  1. Укажите BOT_TOKEN в .env"
+    echo -e "  1. Укажите MAX_BOT_TOKEN в .env"
     echo -e "  2. Укажите OWNER_TELEGRAM_ID в .env"
-    echo -e "  3. Перезапустите: docker compose restart app"
+    echo -e "  3. Примените .env: docker compose up -d --force-recreate app"
     echo ""
 fi
 

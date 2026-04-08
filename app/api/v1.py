@@ -1,15 +1,11 @@
-"""REST API v1 for Telegram Mini App.
+"""REST API v1 for messenger Mini Apps.
 
 Single file — thin handlers calling existing services.
-Auth via Telegram WebApp initData HMAC validation.
+Auth via signed launch data validation.
 """
 
-import hashlib
-import hmac
 import json
-import time
 from math import prod
-from urllib.parse import parse_qs, unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -52,6 +48,7 @@ from app.services.profile import (
     update_profile_fields,
 )
 from app.services.role_context import build_role_context_payload, set_active_role
+from app.services.webapp_auth import validate_webapp_init_data
 from app.services.workspace import (
     get_dashboard_data,
     list_notifications_for_user,
@@ -67,52 +64,31 @@ router = APIRouter(prefix="/api/v1", tags=["v1"])
 # ─── Auth ────────────────────────────────────────────────────
 
 def _validate_init_data(init_data: str, bot_token: str) -> dict | None:
-    """Validate Telegram WebApp initData using HMAC-SHA256.
+    """Backwards-compatible wrapper for signed WebApp init data validation."""
+    return validate_webapp_init_data(init_data, bot_token)
 
-    Returns parsed user data or None if invalid.
-    See: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
-    """
-    try:
-        parsed = parse_qs(init_data, keep_blank_values=True)
-        check_hash = parsed.get("hash", [None])[0]
-        if not check_hash:
-            return None
 
-        # Build data-check-string
-        items = []
-        for key in sorted(parsed.keys()):
-            if key == "hash":
-                continue
-            items.append(f"{key}={parsed[key][0]}")
-        data_check_string = "\n".join(items)
+def _resolve_auth_platform(platform: str | None) -> str:
+    normalized = (platform or "telegram").strip().lower()
+    if normalized not in {"telegram", "max"}:
+        raise HTTPException(400, "Unsupported auth platform")
+    return normalized
 
-        # HMAC validation
-        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        computed = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-        if not hmac.compare_digest(computed, check_hash):
-            return None
-
-        # Check auth_date freshness (allow 24h)
-        auth_date = int(parsed.get("auth_date", ["0"])[0])
-        if time.time() - auth_date > 86400:
-            return None
-
-        user_str = parsed.get("user", [None])[0]
-        if user_str:
-            return json.loads(unquote(user_str))
-        return None
-    except Exception:
-        return None
+def _resolve_platform_token(platform: str, settings) -> str:
+    return settings.max_bot_token if platform == "max" else settings.bot_token
 
 
 class AuthRequest(BaseModel):
     init_data: str
+    platform: str | None = None
 
 
 class AuthResponse(BaseModel):
     user_id: int
+    user_ref: int
     telegram_id: int
+    platform: str
     name: str
     roles: list[str]
     direct_roles: list[str]
@@ -128,35 +104,38 @@ class AuthResponse(BaseModel):
 
 @router.post("/auth", response_model=AuthResponse)
 async def auth_webapp(body: AuthRequest, session: AsyncSession = Depends(get_db)):
-    """Authenticate via Telegram WebApp initData."""
+    """Authenticate via signed Mini App launch data."""
     settings = get_settings()
+    platform = _resolve_auth_platform(body.platform)
 
     # In dev mode, allow JSON user data directly for testing
-    tg_user = None
+    launch_user = None
     if settings.is_dev:
         try:
-            tg_user = json.loads(body.init_data)
+            launch_user = json.loads(body.init_data)
         except (json.JSONDecodeError, TypeError):
             pass
 
-    if not tg_user:
-        tg_user = _validate_init_data(body.init_data, settings.bot_token)
+    if not launch_user:
+        launch_user = _validate_init_data(body.init_data, _resolve_platform_token(platform, settings))
 
-    if not tg_user:
+    if not launch_user:
         raise HTTPException(401, "Invalid init data")
 
     user, _ = await get_or_create_user(
         session,
-        telegram_id=tg_user["id"],
-        first_name=tg_user.get("first_name", "User"),
-        last_name=tg_user.get("last_name"),
-        username=tg_user.get("username"),
+        telegram_id=launch_user["id"],
+        first_name=launch_user.get("first_name", "User"),
+        last_name=launch_user.get("last_name"),
+        username=launch_user.get("username"),
     )
 
     role_context = build_role_context_payload(user)
     return AuthResponse(
         user_id=user.id,
+        user_ref=user.telegram_id,
         telegram_id=user.telegram_id,
+        platform=platform,
         name=user.display_name,
         roles=role_context["roles"],
         direct_roles=role_context["direct_roles"],
@@ -171,20 +150,24 @@ async def auth_webapp(body: AuthRequest, session: AsyncSession = Depends(get_db)
     )
 
 
-# ─── Dependency: resolve user from X-Telegram-Id header ──────
+# ─── Dependency: resolve user from messenger user id ─────────
 
 async def get_current_user(
-    x_telegram_id: int = Query(alias="tg_id"),
+    user_id: int | None = Query(default=None),
+    x_telegram_id: int | None = Query(default=None, alias="tg_id"),
     session: AsyncSession = Depends(get_db),
 ) -> User:
-    """Resolve user by telegram_id passed as query param.
+    """Resolve user by external messenger identifier.
 
     In production, this should use a proper JWT/session from /auth.
-    For Mini App, the initData is validated on frontend load, then
-    tg_id is passed with each request. The bot token HMAC ensures
-    the tg_id is authentic (validated once at /auth).
+    For Mini App, launch params are validated once at /auth, then the
+    external messenger user id is passed with each request.
     """
-    user = await get_user_by_telegram_id(session, x_telegram_id)
+    external_user_id = user_id if user_id is not None else x_telegram_id
+    if external_user_id is None:
+        raise HTTPException(422, "user_id is required")
+
+    user = await get_user_by_telegram_id(session, external_user_id)
     if not user or not user.is_active:
         raise HTTPException(401, "User not found or inactive")
     return user
@@ -520,6 +503,7 @@ async def delete_estimate_api(
 
 class EstimateStatusRequest(BaseModel):
     status: str
+    client_user_id: int | None = None
     client_telegram_id: int | None = None
 
 
@@ -534,13 +518,14 @@ async def update_estimate_status_api(
     estimate = await _load_estimate_entity(session, estimate_id)
 
     # If linking client
-    if body.client_telegram_id:
+    client_user_id = body.client_user_id or body.client_telegram_id
+    if client_user_id:
         if not can_send_estimate_to_client(user, estimate):
             raise HTTPException(403, "Access denied")
-        client = await get_user_by_telegram_id(session, body.client_telegram_id)
+        client = await get_user_by_telegram_id(session, client_user_id)
         if not client:
             client, _ = await get_or_create_user(
-                session, telegram_id=body.client_telegram_id, first_name="Клиент",
+                session, telegram_id=client_user_id, first_name="Клиент",
             )
         estimate.client_id = client.id
         await session.flush()

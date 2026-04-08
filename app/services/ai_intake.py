@@ -9,8 +9,11 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from sqlalchemy import select
+
 from app.config import get_settings
 from app.core.module_registry import is_enabled
+from app.models.catalog import ServiceItem, SharedOperation
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +163,7 @@ class HTTPProvider(AIProvider):
                     json={
                         "model": self.model,
                         "messages": [
-                            {"role": "system", "content": "Ты — ассистент платформы МастерБот. Объясняй понятно и дружелюбно."},
+                            {"role": "system", "content": "Ты — ассистент платформы ПриДел. Объясняй понятно и дружелюбно."},
                             {"role": "user", "content": prompt},
                         ],
                         "temperature": 0.3,
@@ -177,7 +180,7 @@ class HTTPProvider(AIProvider):
 
 def _build_system_prompt(catalog_context: str) -> str:
     """Build the system prompt for request parsing."""
-    return f"""Ты — ИИ-ассистент платформы МастерБот. Помогаешь клиентам определить нужные работы.
+    return f"""Ты — ИИ-ассистент платформы ПриДел. Помогаешь клиентам определить нужные работы.
 
 КАТАЛОГ РАБОТ (код — название — цена, ₽):
 {catalog_context}
@@ -230,12 +233,9 @@ def get_provider() -> AIProvider:
 
 async def build_catalog_context(session, profession_id: int | None = None, limit: int = 100) -> str:
     """Build compact catalog context string for AI prompts."""
-    from sqlalchemy import select
-    from app.models.catalog import ServiceItem, SharedOperation
-
     q = (
         select(ServiceItem.code, ServiceItem.name, ServiceItem.price_recommended, ServiceItem.unit)
-        .where(ServiceItem.is_active == True)
+        .where(ServiceItem.is_active)
         .order_by(ServiceItem.is_popular.desc(), ServiceItem.sort_order)
         .limit(limit)
     )
@@ -246,7 +246,7 @@ async def build_catalog_context(session, profession_id: int | None = None, limit
     lines = [f"{r.code} — {r.name} — {r.price_recommended}₽/{r.unit}" for r in result.all()]
 
     # Add shared operations
-    ops = await session.execute(select(SharedOperation).where(SharedOperation.is_active == True))
+    ops = await session.execute(select(SharedOperation).where(SharedOperation.is_active))
     for op in ops.scalars():
         lines.append(f"{op.code} — {op.name}")
 

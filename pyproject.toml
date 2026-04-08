@@ -1,7 +1,7 @@
 [project]
 name = "masterbot"
 version = "0.1.0"
-description = "Модульная платформа услуг для мастеров. Telegram-first, future-ready."
+description = "Платформа услуг для мастеров с ботом и мини-приложением в MAX."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"

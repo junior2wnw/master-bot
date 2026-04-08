@@ -1,71 +1,63 @@
-# Архитектура МастерБот
+# Архитектура ПриДел
 
-## Подход: Modular Monolith
+## Подход
 
-Единое приложение с чётким разделением на модули. Не микросервисы, не monolith-spaghetti.
+Проект построен как modular monolith: один backend, несколько способов входа в продукт, общая бизнес-логика.
 
 ## Слои
 
-```
-┌────────────────────────────────────┐
-│          Delivery Layer            │
-│  Telegram Bot  │  HTTP API         │
-│  (aiogram 3)   │  (FastAPI)        │
-└───────┬────────┴──────┬────────────┘
-        │               │
-┌───────▼───────────────▼────────────┐
-│          Service Layer              │
-│  auth, catalog, estimate, pricing, │
-│  discount, commission, notification,│
-│  invite, hierarchy, staffing, ai   │
-└───────┬────────────────────────────┘
-        │
-┌───────▼────────────────────────────┐
-│          Core Layer                 │
-│  security (RBAC), events, audit,   │
-│  module_registry, exceptions       │
-└───────┬────────────────────────────┘
-        │
-┌───────▼────────────────────────────┐
-│          Data Layer                 │
-│  SQLAlchemy 2.0 models             │
-│  PostgreSQL 16 + Redis 7           │
-└────────────────────────────────────┘
+```text
+Delivery layer
+  MAX Bot
+  MAX Mini App
+  HTTP API
+
+Service layer
+  auth, catalog, estimate, pricing, discount,
+  commission, payment, notification, invite,
+  hierarchy, staffing, ai, workspace
+
+Core layer
+  security (RBAC), events, audit,
+  module_registry, exceptions
+
+Data layer
+  SQLAlchemy 2.0
+  PostgreSQL 16
+  Redis 7
 ```
 
-## Ключевые принципы
+## Главные принципы
 
-1. **Минимум кода на единицу полезности** — нет абстракций ради абстракций
-2. **Каждый модуль автономен** — свои модели, сервисы, handlers
-3. **Feature flags** — модули отключаются без изменения кода
-4. **Event-driven** — модули общаются через EventBus
-5. **Audit-first** — все бизнес-действия логируются
-6. **Channel-agnostic** — бизнес-логика не зависит от канала доставки
-7. **Workspace-first UX** — bot/web используют единый workspace-сервис для dashboard, inbox и action-needed очередей
+1. Канал не управляет бизнес-логикой. MAX bot и Mini App используют один backend.
+2. Все важные действия проходят через сервисный слой.
+3. События расходятся через Event Bus, а не через прямые связи между модулями.
+4. Аудит и уведомления считаются частью доменной логики, а не внешним дополнением.
+5. Пользовательский интерфейс строится вокруг рабочего пространства: сметы, задачи, согласования, уведомления.
 
 ## Поток данных
 
+```text
+Клиент в MAX -> Bot / Mini App -> API -> Services -> Models -> DB
+                                      |
+                                      -> Event Bus -> Notification Dispatcher
+                                      |
+                                      -> Audit Log
 ```
-Клиент → Telegram → Bot Handler → Service → Model → DB
-                                      ↓
-                              Event Bus → Notification Service → Telegram
-                                      ↓
-                              Audit Log
-```
 
-## База данных
+## MAX-специфика
 
-PostgreSQL 16 с async через asyncpg. SQLAlchemy 2.0 Mapped types.
-Миграции через Alembic. Naming convention для всех constraints.
+- Бот работает через MAX Bot API.
+- Для разработки используется long polling через `GET /updates`.
+- Mini App получает стартовые данные через `window.WebApp.initData`.
+- Сервер валидирует подпись launch params по алгоритму MAX.
+- Публичный запуск Mini App строится вокруг ссылки `https://max.ru/<botName>?startapp`.
 
-## Кэширование
+## Хранилища
 
-Redis используется для:
-- Feature flags cache (in-memory + Redis fallback)
-- Rate limiting
-- Session cache (future)
+- PostgreSQL хранит пользователей, роли, каталог, сметы, заказы, оплаты, аудит и системные настройки.
+- Redis используется для инфраструктурных задач: rate limit, очереди, кэш служебных данных.
 
-## AI
+## Эволюция
 
-Provider-agnostic интерфейс. Текущая реализация: HTTP-based (OpenAI-compatible).
-Переключение через env. Prompt management через БД с версионированием.
+В коде сохранились отдельные исторические имена полей вроде `telegram_id`. Сейчас они используются как внешний ID пользователя мессенджера и не должны трактоваться как каналовая привязка документации или продукта.

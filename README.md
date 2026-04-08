@@ -1,193 +1,145 @@
-# МастерБот
+# ПриДел
 
-> Модульная платформа услуг для мастеров. Telegram-first, future-ready.
+> Платформа услуг для мастеров с ботом и мини-приложением в MAX.
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.yml)
 
----
-
 ## Что это
 
-МастерБот — open-source платформа для управления услугами мастеров: электрика, сантехника, сборка мебели и любые другие сервисные профессии.
+ПриДел помогает вести полный цикл сервисных работ: каталог услуг, сметы, заказы, согласования, оплаты, уведомления и роли команды.
 
-Платформа решает весь цикл: от заявки клиента до оплаты, включая каталог работ, сметы, согласования, скидки, комиссии, уведомления и аналитику.
+Основной сценарий запуска:
 
-**Стартуем с Telegram**, но архитектура позволяет подключить любой канал: web, VK, MAX и другие.
+- пользователь открывает бота в MAX;
+- из чата запускает мини-приложение;
+- работает в web-интерфейсе со сметами, профилем и заказами;
+- backend на FastAPI хранит состояние в PostgreSQL и фоновые события в Redis.
 
-## Ключевые возможности
+## Что уже есть
 
-**Для клиента:**
-- Описание задачи текстом или голосом (AI-парсинг)
-- Предварительная смета с прозрачным breakdown
-- Согласование изменений сметы на месте
-- Оплата по QR / номеру телефона
-- История заказов и повтор
-
-**Для мастера:**
-- Быстрый поиск работ по каталогу (full-text, алиасы, хэштеги)
-- Сборка сметы в несколько кликов
-- Action-center режим в Telegram: рабочий стол, входящие, карточки действий без лишних меню
-- Шаблоны и популярные работы
-- Изменение объёма на месте с версионированием
-- Личный кабинет с доходами и статистикой
-
-**Для старшего мастера:**
-- Управление своей веткой мастеров
-- Согласование скидок
-- 5% комиссия с первой линии
-- Аналитика по ветке
-
-**Для админа:**
-- Полное управление каталогом, ценами, коэффициентами
-- Инвайты и модерация подключений
-- Назначение старших мастеров
-- Feature flags и управление модулями
-- Кадровые действия с audit trail
-
-**Для product owner:**
-- Финансовый мониторинг и комиссии
-- Воронка, споры, качество AI
-- Управление провайдерами и каналами
-- Глобальные настройки платформы
-
-## Архитектура
-
-```
-┌─────────────────────────────────────────────┐
-│              КАНАЛЫ ДОСТУПА                 │
-│  Telegram (active) │ Web │ VK │ MAX (plan)  │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│              ЯДРО ПЛАТФОРМЫ                  │
-│  Auth → RBAC → Иерархия → Feature Flags     │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│           БИЗНЕС-МОДУЛИ                      │
-│  Каталог → Поиск → Сметы → Заказы           │
-│  Ценообразование → Коэффициенты → Скидки     │
-│  Платежи → Комиссии → AI Intake              │
-│  Согласования → Уведомления → Аудит          │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│             УПРАВЛЕНИЕ                       │
-│  Админ-панель → Owner-панель → Аналитика     │
-└─────────────────────────────────────────────┘
-```
-
-## Ролевая модель
-
-```
-product_owner ─── полный доступ
-  └── admin ─── управление платформой + может быть мастером
-        ├── senior_master ─── ветка мастеров, 5% комиссия
-        │     ├── master
-        │     └── master
-        └── master ─── напрямую под админом
-client ─── отдельная роль, может сосуществовать с другими
-```
+- MAX bot runtime через Bot API и long polling
+- Mini App аутентификация по подписанным launch params
+- каталог работ, поиск и коэффициенты
+- сметы с версиями, экспортом PDF/XLSX и QR-оплатой
+- роли `client`, `master`, `senior_master`, `admin`, `product_owner`
+- уведомления, аудит, feature flags, AI intake
 
 ## Быстрый старт
 
 ```bash
-# Клонировать
 git clone https://github.com/junior2wnw/master-bot.git
 cd master-bot
-
-# Настроить
 cp .env.example .env
-# Отредактировать .env: BOT_TOKEN, DATABASE_URL
+```
 
-# Поднять
+Заполните минимум:
+
+- `MAX_BOT_TOKEN`
+- `WEBAPP_URL`
+- `DATABASE_URL`
+
+Локальный запуск через Docker:
+
+```bash
 make up
-
-# Инициализировать БД и загрузить каталог
 make migrate
 make seed
 ```
 
-Одна команда `make up` поднимает: приложение, PostgreSQL, Redis.
+Приложение поднимется на `http://localhost:8000`, Mini App статика будет доступна по `/app`.
 
-## Деплой на сервер (Ubuntu)
+## Подключение в MAX
 
-Для production-деплоя на чистый Ubuntu-сервер — один скрипт делает всё:
+1. Создайте чат-бота в кабинете партнёров MAX: `business.max.ru`.
+2. Получите токен в разделе интеграции и сохраните его в `MAX_BOT_TOKEN`.
+3. Разместите приложение по публичному `https://` URL.
+4. Укажите этот URL в настройках бота: `Чат-бот и мини-приложение -> Настроить`.
+5. Выберите кнопку запуска мини-приложения и сохраните настройки.
 
-```bash
-# Скачиваем проект
-git clone https://github.com/junior2wnw/master-bot.git
-cd master-bot
+Что учитывает проект по документации MAX:
 
-# Запускаем — установит Docker, создаст .env, поднимет контейнеры, настроит systemd
-sudo bash deploy/setup.sh --bot-token "YOUR_BOT_TOKEN"
+- Bot API авторизуется через заголовок `Authorization: <token>`
+- для разработки и тестирования используется `GET /updates` c long polling
+- Mini App стартовые данные берутся из `window.WebApp.initData`
+- подпись launch params валидируется через `HMAC-SHA256("WebAppData", token)`
+- приложение открывается внутри MAX по диплинку вида `https://max.ru/<botName>?startapp`
+
+## Архитектура
+
+```text
+MAX Bot / Mini App -> FastAPI -> Services -> SQLAlchemy models -> PostgreSQL
+                                 |
+                                 -> Event Bus -> Notifications / Audit / Background jobs
+                                 |
+                                 -> Redis
 ```
 
-Скрипт автоматически:
-- Установит Docker CE + Compose v2
-- Сгенерирует надёжные пароли и секреты
-- Применит миграции и загрузит каталог
-- Настроит systemd, UFW, logrotate
-- Проверит здоровье всех сервисов
+Ключевой принцип: бизнес-логика не должна зависеть от конкретного UI-канала. Бот и Mini App выступают слоем доставки над одним backend.
 
-Дополнительные флаги: `--domain`, `--port`, `--skip-firewall`, `--skip-systemd`, `--skip-seed`.
+## Конфигурация
 
-## CI/CD
+Основные переменные окружения:
 
-GitHub Actions автоматически запускает на каждый push/PR:
-- **Lint** — ruff check + format
-- **Unit tests** — быстрые тесты без зависимостей
-- **Integration tests** — с PostgreSQL + Redis в контейнерах
-- **Docker build** — проверка сборки образа
+- `MAX_BOT_TOKEN` — токен чат-бота MAX
+- `MAX_API_BASE_URL` — базовый URL MAX API, по умолчанию `https://platform-api.max.ru`
+- `MAX_POLLING_TIMEOUT_SEC` — таймаут long polling
+- `WEBAPP_URL` — публичный URL мини-приложения
+- `PLATFORM_NAME` — пользовательское имя платформы, по умолчанию `ПриДел`
 
-## Модульность
+Полный шаблон смотрите в `.env.example`.
 
-Каждый модуль автономен и может быть отключен через feature flags:
+## Деплой
 
-| Модуль | Описание | Можно отключить |
-|--------|----------|:---:|
-| auth | Аутентификация через Telegram | - |
-| catalog | Каталог работ и поиск | - |
-| estimates | Сметы и версионирование | - |
-| orders | Заказы и заявки | + |
-| discounts | Скидки и согласование | + |
-| payments | Платежи и QR | + |
-| commissions | Расчёт комиссий | + |
-| ai | AI-парсинг голоса и текста | + |
-| notifications | Уведомления | + |
-| invites | Инвайт-система | + |
-| analytics | Аналитика и метрики | + |
+Для Ubuntu есть скрипт:
 
-## Стек
+```bash
+sudo bash deploy/setup.sh \
+  --max-bot-token "YOUR_MAX_TOKEN" \
+  --webapp-url "https://YOUR_DOMAIN/app"
+```
 
-- **Python 3.12+** — FastAPI + aiogram 3
-- **PostgreSQL 16** — основная БД
-- **Redis 7** — кэш и очереди
-- **Alembic** — миграции
-- **Docker Compose** — деплой одной командой
+Если меняете `MAX_BOT_TOKEN`, `WEBAPP_URL` или другие переменные окружения после первого запуска, применяйте их через пересоздание контейнера:
 
-## Roadmap
+```bash
+docker compose up -d --force-recreate app
+```
 
-См. [ROADMAP.md](ROADMAP.md)
+Он:
 
-## Участие
+- создаёт `.env`
+- поднимает Docker Compose
+- применяет миграции
+- загружает seed-данные
+- настраивает systemd и базовые системные параметры
 
-См. [CONTRIBUTING.md](CONTRIBUTING.md)
+После деплоя проверьте:
 
----
+- `/health`
+- публичный `https://.../app`
+- запуск Mini App из интерфейса MAX
+
+Подробный production-процесс для боевого сервера `pridel`:
+
+- alias `pridel` указывает на `root@193.47.43.64`
+- Mini App сейчас поднимается через `https://193.47.43.64.sslip.io/app`
+- отдельная инструкция лежит в [docs/deploy_pridel.md](docs/deploy_pridel.md)
+
+## Разработка
+
+- `make test` — локальные тесты
+- `make lint` — линтеры
+- `make dev` — локальный uvicorn
+
+## Документация
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/deploy_pridel.md](docs/deploy_pridel.md)
+- [docs/modules.md](docs/modules.md)
+- [docs/db_schema.md](docs/db_schema.md)
+- [ROADMAP.md](ROADMAP.md)
 
 ## English
 
-**MasterBot** is an open-source modular service platform for skilled workers (electricians, plumbers, furniture assemblers, etc.). Telegram-first, but designed for multi-channel expansion.
-
-Key features: service catalog with fast search, versioned estimates, discount approval workflows, commission engine, role hierarchy (owner → admin → senior master → master → client), AI voice/text intake, QR payments, and full audit trail.
-
-```bash
-cp .env.example .env && make up && make migrate && make seed
-```
-
-See [ROADMAP.md](ROADMAP.md) for planned features. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-License: [MIT](LICENSE)
+PriDel is a service workflow platform for field specialists with a MAX bot, MAX Mini App, FastAPI backend, PostgreSQL, and Redis. The repo is structured as a modular monolith so the same business logic can power bot actions, Mini App screens, exports, approvals, and notifications.

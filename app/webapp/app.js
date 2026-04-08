@@ -4,7 +4,11 @@
    в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ */
 
 const API = '/api/v1';
-const tg = window.Telegram?.WebApp;
+const maxApp = (window.WebApp?.initData || window.location.hash.includes('WebAppData=')) ? window.WebApp : null;
+const tg = window.Telegram?.WebApp?.initData ? window.Telegram.WebApp : null;
+const messengerApp = maxApp || tg;
+const APP_TITLE = 'ПриДел';
+const APP_PLATFORM = maxApp ? 'max' : 'telegram';
 
 // в”Ђв”Ђв”Ђ State в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 const state = {
@@ -29,7 +33,7 @@ const state = {
 };
 
 const SCREEN_TITLES = {
-  dashboard: 'РњР°СЃС‚РµСЂР‘РѕС‚',
+  dashboard: APP_TITLE,
   search: 'РџРѕРёСЃРє',
   catalog: 'РљР°С‚Р°Р»РѕРі',
   estimates: 'РЎРјРµС‚С‹',
@@ -109,15 +113,15 @@ function activateScreen(screen, params = {}) {
 
 // в”Ђв”Ђв”Ђ Init в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 async function init() {
-  if (tg) {
-    tg.ready();
-    tg.expand();
-    tg.enableClosingConfirmation();
+  if (messengerApp) {
+    messengerApp.ready?.();
+    messengerApp.expand?.();
+    messengerApp.enableClosingConfirmation?.();
   }
 
   try {
-    const initData = tg?.initData || JSON.stringify({id: 1, first_name: 'Dev', username: 'dev'});
-    const res = await api('POST', '/auth', {init_data: initData});
+    const initData = messengerApp?.initData || JSON.stringify({id: 1, first_name: 'Dev', username: 'dev'});
+    const res = await api('POST', '/auth', {init_data: initData, platform: APP_PLATFORM});
     state.user = res;
     applyRoleContext(res);
     setupUI();
@@ -140,7 +144,7 @@ function hideLoader() {
 async function api(method, path, body) {
   const url = new URL(API + path, window.location.origin);
   if (state.user && method === 'GET') {
-    url.searchParams.set('tg_id', state.user.telegram_id);
+    url.searchParams.set('user_id', state.user.user_ref || state.user.telegram_id);
   }
 
   const opts = {method, headers: {}};
@@ -148,7 +152,7 @@ async function api(method, path, body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
     if (state.user) {
-      url.searchParams.set('tg_id', state.user.telegram_id);
+      url.searchParams.set('user_id', state.user.user_ref || state.user.telegram_id);
     }
   }
 
@@ -202,7 +206,7 @@ function goBack() {
       t.classList.toggle('active', t.dataset.tab === prev.screen);
     });
     document.getElementById('btn-back').classList.toggle('hidden', state.history.length === 0);
-    const titles = {dashboard:'РњР°СЃС‚РµСЂР‘РѕС‚',search:'РџРѕРёСЃРє',catalog:'РљР°С‚Р°Р»РѕРі',estimates:'РЎРјРµС‚С‹',profile:'РџСЂРѕС„РёР»СЊ'};
+    const titles = {dashboard:APP_TITLE,search:'РџРѕРёСЃРє',catalog:'РљР°С‚Р°Р»РѕРі',estimates:'РЎРјРµС‚С‹',profile:'РџСЂРѕС„РёР»СЊ'};
     document.getElementById('header-title').textContent = titles[prev.screen] || '';
   }
 }
@@ -655,8 +659,8 @@ function renderEstimate(est) {
       <div class="export-bar mt-12">
         <div class="export-title">Р’С‹РіСЂСѓР·РёС‚СЊ СЃРјРµС‚Сѓ</div>
         <div class="export-buttons">
-          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/pdf?tg_id=${state.user.telegram_id}" target="_blank">рџ“„ PDF</a>
-          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/xlsx?tg_id=${state.user.telegram_id}" target="_blank">рџ“Љ XLSX</a>
+          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/pdf?user_id=${state.user.user_ref || state.user.telegram_id}" target="_blank">рџ“„ PDF</a>
+          <a class="btn btn-secondary btn-sm" href="${API}/estimates/${est.id}/export/xlsx?user_id=${state.user.user_ref || state.user.telegram_id}" target="_blank">рџ“Љ XLSX</a>
           <button class="btn btn-secondary btn-sm" onclick="navigate('qr', {estimateId: ${est.id}})">рџ’і QR РѕРїР»Р°С‚Р°</button>
         </div>
       </div>
@@ -1306,7 +1310,7 @@ async function loadProfileEdit() {
       ${formField('pe-full_name', 'Р¤РРћ', p.full_name, 'РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡')}
       ${formField('pe-phone', 'РўРµР»РµС„РѕРЅ', p.phone, '+7 999 123-45-67')}
       ${formField('pe-email', 'Email', p.email, 'master@mail.ru')}
-      ${formField('pe-telegram_username', 'Telegram', p.telegram_username, '@username')}
+      ${formField('pe-telegram_username', 'Ник в мессенджере', p.telegram_username, '@username')}
       ${formField('pe-company_name', 'РљРѕРјРїР°РЅРёСЏ / РРџ', p.company_name, 'РРџ РРІР°РЅРѕРІ Р.Р.')}
       ${formField('pe-inn', 'РРќРќ', p.inn, '123456789012')}
       ${formField('pe-address', 'РђРґСЂРµСЃ', p.address, 'Рі. РЎС‚РµСЂР»РёС‚Р°РјР°Рє, СѓР». ...')}

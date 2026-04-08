@@ -8,7 +8,7 @@ For simplicity, we generate a plain-text payment instruction with phone/card
 that the master shares with the client. Full bank QR requires merchant credentials.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,7 +88,7 @@ async def confirm_payment(
     payment.status = "confirmed"
     payment.amount_paid = amount_paid or payment.amount_expected
     payment.marked_by = confirmed_by
-    payment.paid_at = datetime.now(timezone.utc)
+    payment.paid_at = datetime.now(UTC)
     payment.proof_url = proof_url
     await session.flush()
 
@@ -161,7 +161,7 @@ def _build_payment_text(amount: int, settings) -> str:
         parts.append(f"🏦 Банк: {settings.payment_bank_name}")
     if settings.payment_recipient_name:
         parts.append(f"👤 Получатель: {settings.payment_recipient_name}")
-    parts.append(f"📝 Назначение: Оплата услуг МастерБот")
+    parts.append("📝 Назначение: Оплата услуг ПриДел")
     return "\n".join(parts)
 
 

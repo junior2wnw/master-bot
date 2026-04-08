@@ -1,4 +1,4 @@
-"""Notification dispatcher: delivers pending notifications via Telegram.
+"""Notification dispatcher: delivers pending notifications via messenger bots.
 
 Runs as a background task during bot polling. Picks up pending notifications
 from the DB, delivers them via the appropriate channel, marks them sent/failed.
@@ -15,6 +15,7 @@ from string import Template
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.events import Event, event_bus
 from app.database import get_async_session
 from app.models.notification import Notification, NotificationTemplate
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Will be set by bot startup
 _bot_instance = None
+_max_client_instance = None
 _handlers_subscribed = False
 
 
@@ -33,17 +35,19 @@ def set_bot(bot) -> None:
     _bot_instance = bot
 
 
+def set_max_client(client) -> None:
+    """Set the MAX client instance for notification delivery."""
+    global _max_client_instance
+    _max_client_instance = client
+
+
 async def deliver_notification(session: AsyncSession, notification: Notification) -> bool:
     """Deliver a single notification via its channel."""
-    if _bot_instance is None:
+    if _bot_instance is None and _max_client_instance is None:
         logger.warning("Bot not initialized, cannot deliver notification %d", notification.id)
         return False
 
-    if notification.channel != "telegram":
-        logger.warning("Unsupported channel '%s' for notification %d", notification.channel, notification.id)
-        return False
-
-    # Get user's telegram_id
+    # Get user's external messenger id
     result = await session.execute(select(User).where(User.id == notification.user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -53,20 +57,39 @@ async def deliver_notification(session: AsyncSession, notification: Notification
     # Build message
     text = f"🔔 <b>{notification.title}</b>\n\n{notification.body}"
 
-    # Build action keyboard based on event type
-    reply_markup = _build_action_keyboard(notification)
-
     try:
-        await _bot_instance.send_message(
-            chat_id=user.telegram_id,
-            text=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+        if _bot_instance is not None and notification.channel == "telegram":
+            reply_markup = _build_action_keyboard(notification)
+            await _bot_instance.send_message(
+                chat_id=user.telegram_id,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        elif _max_client_instance is not None:
+            await _max_client_instance.send_message(
+                user_id=user.telegram_id,
+                text=text,
+                attachments=_build_max_action_keyboard(),
+                format="html",
+            )
+        else:
+            logger.warning(
+                "No compatible delivery backend for channel '%s' and notification %d",
+                notification.channel,
+                notification.id,
+            )
+            return False
+
         notification.status = "sent"
         notification.sent_at = datetime.now(UTC)
         await session.flush()
-        logger.info("Notification %d delivered to user %d (tg=%d)", notification.id, user.id, user.telegram_id)
+        logger.info(
+            "Notification %d delivered to user %d (external_id=%d)",
+            notification.id,
+            user.id,
+            user.telegram_id,
+        )
         return True
     except Exception as e:
         notification.status = "failed"
@@ -129,6 +152,22 @@ def _build_action_keyboard(notification: Notification):
     buttons.append([InlineKeyboardButton(text="← Меню", callback_data="main_menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+
+def _build_max_action_keyboard() -> list[dict] | None:
+    settings = get_settings()
+    if not settings.webapp_url:
+        return None
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [{"type": "link", "text": "Открыть ПриДел", "url": settings.webapp_url}],
+                ],
+            },
+        },
+    ]
 
 
 async def dispatch_pending(batch_size: int = 20) -> int:

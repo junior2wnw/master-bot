@@ -339,7 +339,7 @@ def export_pdf(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     if profile.email:
         master_lines.append(f"<b>Email:</b> {profile.email}")
     if profile.telegram_username:
-        master_lines.append(f"<b>Telegram:</b> @{profile.telegram_username.lstrip('@')}")
+        master_lines.append(f"<b>Ник:</b> @{profile.telegram_username.lstrip('@')}")
     if profile.inn:
         master_lines.append(f"<b>ИНН:</b> {profile.inn}")
     if profile.address:
@@ -582,7 +582,7 @@ def export_xlsx(estimate: ExportEstimate, profile: ExportProfile) -> bytes:
     add_field("Тел.:", profile.phone)
     add_field("Email:", profile.email)
     if profile.telegram_username:
-        add_field("Telegram:", f"@{profile.telegram_username.lstrip('@')}")
+        add_field("Ник:", f"@{profile.telegram_username.lstrip('@')}")
     add_field("ИНН:", profile.inn)
     add_field("Адрес:", profile.address)
 

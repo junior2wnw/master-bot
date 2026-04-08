@@ -61,6 +61,7 @@ migrations/versions/__pycache__/
 
 # Local operational scratch files
 .mcp.json
+.deploy/
 .deploy_bundle_*.tar.gz
 /_deploy.py
 /_fix_vpn.py

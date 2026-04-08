@@ -1,4 +1,4 @@
-"""Application entry point. Starts FastAPI + Telegram bot concurrently."""
+"""Application entry point. Starts FastAPI and messenger bots concurrently."""
 
 import asyncio
 import logging
@@ -15,7 +15,11 @@ from app.api.v1 import router as v1_router
 from app.config import get_settings
 from app.core.module_registry import load_flags, load_settings
 from app.database import get_async_session
-from app.services.notification_dispatcher import notification_worker, set_bot, subscribe_event_handlers
+from app.services.notification_dispatcher import (
+    notification_worker,
+    set_bot,
+    subscribe_event_handlers,
+)
 
 
 def configure_logging(settings) -> None:
@@ -82,8 +86,8 @@ def create_app() -> FastAPI:
     return app
 
 
-async def start_bot() -> None:
-    """Start Telegram bot polling + notification worker."""
+async def start_telegram_bot() -> None:
+    """Start Telegram bot polling."""
     settings = get_settings()
     if not settings.bot_token or settings.bot_token == "your_telegram_bot_token_here":
         logging.getLogger(__name__).warning("BOT_TOKEN not set, skipping Telegram bot")
@@ -93,16 +97,23 @@ async def start_bot() -> None:
 
     bot, dp = create_bot()
     set_bot(bot)
-    subscribe_event_handlers()
 
     try:
-        # Run bot polling and notification worker concurrently
-        await asyncio.gather(
-            dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()),
-            notification_worker(interval=10.0),
-        )
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         await bot.session.close()
+
+
+async def start_max_bot() -> None:
+    """Start MAX bot long polling."""
+    settings = get_settings()
+    if not settings.max_bot_token:
+        logging.getLogger(__name__).warning("MAX_BOT_TOKEN not set, skipping MAX bot")
+        return
+
+    from app.max_bot.app import run_max_bot
+
+    await run_max_bot()
 
 
 async def start_api() -> None:
@@ -120,17 +131,24 @@ async def start_api() -> None:
 
 
 async def main() -> None:
-    """Run bot and API concurrently."""
+    """Run API, bot runtimes, and shared workers concurrently."""
     settings = get_settings()
     configure_logging(settings)
 
     logger = structlog.get_logger()
-    logger.info("Starting МастерБот", env=settings.app_env)
+    logger.info("Starting ПриДел", env=settings.app_env)
 
-    await asyncio.gather(
+    tasks = [
         start_api(),
-        start_bot(),
-    )
+        start_telegram_bot(),
+        start_max_bot(),
+    ]
+    if (
+        settings.bot_token and settings.bot_token != "your_telegram_bot_token_here"
+    ) or settings.max_bot_token:
+        tasks.append(notification_worker(interval=10.0))
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":

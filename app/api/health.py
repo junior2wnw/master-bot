@@ -1,13 +1,18 @@
 """Health and readiness endpoints."""
 
 from fastapi import APIRouter
+from redis.asyncio import from_url
+from sqlalchemy import text
+
+from app.config import get_settings
+from app.database import get_async_session
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "masterbot"}
+    return {"status": "ok", "service": "pridel"}
 
 
 @router.get("/ready")
@@ -17,8 +22,6 @@ async def readiness() -> dict:
 
     # DB check
     try:
-        from app.database import get_async_session
-        from sqlalchemy import text
         async with get_async_session()() as session:
             await session.execute(text("SELECT 1"))
         checks["database"] = "ok"
@@ -27,8 +30,6 @@ async def readiness() -> dict:
 
     # Redis check
     try:
-        from redis.asyncio import from_url
-        from app.config import get_settings
         r = from_url(get_settings().redis_url)
         await r.ping()
         await r.aclose()

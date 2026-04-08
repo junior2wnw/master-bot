@@ -25,7 +25,7 @@ PROFILE_FIELD_META: dict[str, dict[str, str]] = {
     "full_name": {"label": "ФИО", "placeholder": "Иванов Иван Иванович"},
     "phone": {"label": "Телефон", "placeholder": "+7 999 123-45-67"},
     "email": {"label": "Email", "placeholder": "master@mail.ru"},
-    "telegram_username": {"label": "Telegram", "placeholder": "@username"},
+    "telegram_username": {"label": "Ник в мессенджере", "placeholder": "@username"},
     "company_name": {"label": "Компания / ИП", "placeholder": "ИП Иванов И.И."},
     "inn": {"label": "ИНН", "placeholder": "123456789012"},
     "address": {"label": "Адрес", "placeholder": "г. Стерлитамак, ул. ..."},
