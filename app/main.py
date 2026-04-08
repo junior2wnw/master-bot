@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import pathlib
+from contextlib import asynccontextmanager
 
 import structlog
 import uvicorn
@@ -57,28 +58,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
 
-    app = FastAPI(
-        title=settings.platform_name,
-        version="0.1.0",
-        docs_url="/docs" if settings.is_dev else None,
-        redoc_url=None,
-    )
-
-    app.include_router(health_router)
-    app.include_router(admin_router)
-    app.include_router(max_webhook_router)
-    app.include_router(v1_router)
-    app.include_router(superapp_router)
-
-    # Serve Mini App static files
-    webapp_dir = pathlib.Path(__file__).parent / "webapp"
-    dist_dir = webapp_dir / "dist"
-    static_dir = dist_dir if dist_dir.exists() else webapp_dir
-    if static_dir.exists():
-        app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="webapp")
-
-    @app.on_event("startup")
-    async def startup() -> None:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
         subscribe_event_handlers()
         async with get_async_session()() as session:
             try:
@@ -96,10 +77,32 @@ def create_app() -> FastAPI:
             except Exception:
                 logging.getLogger(__name__).exception("Failed to initialize MAX webhook runtime")
 
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        if settings.max_bot_token and get_max_delivery_mode(settings) == "webhook":
-            await shutdown_max_runtime()
+        try:
+            yield
+        finally:
+            if settings.max_bot_token and get_max_delivery_mode(settings) == "webhook":
+                await shutdown_max_runtime()
+
+    app = FastAPI(
+        title=settings.platform_name,
+        version="0.1.0",
+        docs_url="/docs" if settings.is_dev else None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
+
+    app.include_router(health_router)
+    app.include_router(admin_router)
+    app.include_router(max_webhook_router)
+    app.include_router(v1_router)
+    app.include_router(superapp_router)
+
+    # Serve Mini App static files
+    webapp_dir = pathlib.Path(__file__).parent / "webapp"
+    dist_dir = webapp_dir / "dist"
+    static_dir = dist_dir if dist_dir.exists() else webapp_dir
+    if static_dir.exists():
+        app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="webapp")
 
     return app
 
