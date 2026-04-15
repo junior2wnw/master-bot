@@ -916,9 +916,27 @@ select:focus-visible {
   margin-bottom: 4px;
 }
 
+.workspace-intent-copy {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
 .workspace-intent p {
   margin: 0;
   color: var(--muted);
+}
+
+.workspace-intent-actions {
+  display: flex;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.workspace-intent-actions .btn {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .window-composer {
@@ -1090,6 +1108,11 @@ select:focus-visible {
     flex-direction: column;
   }
 
+  .workspace-intent-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
   .dock {
     width: calc(100% - 20px);
     justify-content: space-between;
@@ -1243,6 +1266,11 @@ select:focus-visible {
 
   .workspace-intent {
     padding: 12px 14px;
+  }
+
+  .workspace-intent-actions .btn {
+    flex: 1 1 calc(50% - 5px);
+    justify-content: center;
   }
 
   .window-pill {

@@ -293,7 +293,7 @@ export function NotificationsPanel({
   onOpenTarget,
 }: {
   externalUserId: number;
-  onOpenTarget: (callback?: string | null) => void;
+  onOpenTarget: (notification: NotificationItem) => void;
 }) {
   const queryClient = useQueryClient();
   const notificationsQuery = useQuery({
@@ -326,7 +326,7 @@ export function NotificationsPanel({
               <p>{notification.body}</p>
               <div className="action-row">
                 {notification.target_label ? (
-                  <button className="btn btn-primary" onClick={() => onOpenTarget(notification.target_callback)}>
+                  <button className="btn btn-primary" onClick={() => onOpenTarget(notification)}>
                     {notification.target_label}
                   </button>
                 ) : null}

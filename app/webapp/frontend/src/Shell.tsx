@@ -10,6 +10,15 @@ import {
   useCompactLayout,
   useSplitDirection,
 } from "./appHelpers";
+import {
+  buildEstimateIntent,
+  buildGeneralIntent,
+  buildNotificationIntent,
+  buildOrderIntent,
+  buildProfileIntent,
+  type ComposerRecommendation,
+  type ComposerIntentSurface,
+} from "./composerIntents";
 import { ControlCenterPanel } from "./ControlCenterPanel";
 import { EstimateDrawer } from "./estimateDrawer";
 import { BoardResponsesDrawer, MasterDrawer, RoleModeDrawer } from "./marketDrawers";
@@ -17,7 +26,17 @@ import { BoardPanel, NetworkPanel } from "./marketPanels";
 import { OrderDrawer } from "./orderDrawer";
 import { ProfilePanel } from "./profilePanel";
 import { useWorkspaceStore } from "./store";
-import type { BootstrapResponse, LayoutPayload, PaneId, PanelMeta, RoleModeResponse } from "./types";
+import type {
+  BootstrapResponse,
+  EstimateDetail,
+  LayoutPayload,
+  NotificationItem,
+  OrderDetail,
+  PaneId,
+  PanelMeta,
+  ProfileResponse,
+  RoleModeResponse,
+} from "./types";
 import { WindowComposer } from "./windowComposer";
 import {
   closeComposerWindow,
@@ -205,6 +224,8 @@ export function Shell({
   const splitDirection = useSplitDirection();
   const compactLayout = useCompactLayout();
   const { layout, panels, presets, bootstrap: bootState, commandOpen, hydrateFromBootstrap, replaceLayout, setCommandOpen } = useWorkspaceStore();
+  const panelRegistry = panels.length ? panels : bootstrap.panels;
+  const shellBootstrap = bootState ?? bootstrap;
   const [selectedMasterId, setSelectedMasterId] = useState<number | null>(null);
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
@@ -212,6 +233,13 @@ export function Shell({
   const [roleDrawerOpen, setRoleDrawerOpen] = useState(false);
   const [paletteMode, setPaletteMode] = useState<PaletteMode>("open");
   const [activeCompactWindowId, setActiveCompactWindowId] = useState<string>("");
+  const [intentContext, setIntentContext] = useState<
+    | { kind: "estimate"; detail: EstimateDetail }
+    | { kind: "order"; detail: OrderDetail }
+    | { kind: "profile"; detail: Pick<ProfileResponse, "phone" | "specialization"> | null }
+    | { kind: "notification"; detail: NotificationItem }
+    | null
+  >(null);
   const layoutSaveRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -222,7 +250,7 @@ export function Shell({
   const presetMutation = useMutation({
     mutationFn: async (presetId: string) => api.getLayout(externalUserId, presetId),
     onSuccess: (nextLayout) => {
-      const normalized = ensureComposerLayout(nextLayout, panels.length ? panels : bootstrap.panels);
+      const normalized = ensureComposerLayout(nextLayout, panelRegistry);
       layoutSaveRef.current = JSON.stringify(normalized);
       replaceLayout(normalized);
     },
@@ -231,7 +259,7 @@ export function Shell({
   const saveLayoutMutation = useMutation({
     mutationFn: async (nextLayout: LayoutPayload) => api.saveLayout(externalUserId, nextLayout.preset, nextLayout),
     onSuccess: (savedLayout) => {
-      const normalized = ensureComposerLayout(savedLayout, panels.length ? panels : bootstrap.panels);
+      const normalized = ensureComposerLayout(savedLayout, panelRegistry);
       layoutSaveRef.current = JSON.stringify(normalized);
       replaceLayout(normalized);
     },
@@ -261,6 +289,7 @@ export function Shell({
       setSelectedOrderId(null);
       setSelectedMasterId(null);
       setSelectedBoardPostId(null);
+      setIntentContext(null);
       queryClient.setQueryData(["role-mode", externalUserId], roleMode);
       await queryClient.invalidateQueries({ queryKey: ["bootstrap", externalUserId] });
       await queryClient.invalidateQueries({ queryKey: ["profile", externalUserId] });
@@ -299,15 +328,48 @@ export function Shell({
     }
   }, [activeCompactWindowId, layout]);
 
-  if (!layout || !bootState) {
+  const currentLayout = useMemo(() => {
+    if (!layout) {
+      return null;
+    }
+    return ensureComposerLayout(layout, panelRegistry);
+  }, [layout, panelRegistry]);
+
+  const intentSurface = useMemo<ComposerIntentSurface | null>(() => {
+    if (!currentLayout) {
+      return null;
+    }
+    const intentCtx = {
+      layout: currentLayout,
+      panels: panelRegistry,
+      bootstrap: shellBootstrap,
+      splitAxis: compactLayout ? "vertical" : splitDirection,
+    } as const;
+    if (!intentContext) {
+      return buildGeneralIntent(intentCtx);
+    }
+    switch (intentContext.kind) {
+      case "estimate":
+        return buildEstimateIntent(intentCtx, intentContext.detail);
+      case "order":
+        return buildOrderIntent(intentCtx, intentContext.detail);
+      case "profile":
+        return buildProfileIntent(intentCtx, intentContext.detail);
+      case "notification":
+        return buildNotificationIntent(intentCtx, intentContext.detail);
+      default:
+        return buildGeneralIntent(intentCtx);
+    }
+  }, [compactLayout, currentLayout, intentContext, panelRegistry, shellBootstrap, splitDirection]);
+
+  if (!currentLayout || !intentSurface) {
     return null;
   }
 
-  const currentLayout = ensureComposerLayout(layout, panels);
   const composer = currentLayout.composer!;
-  const activeRoleLabel = roleModeQuery.data?.active_role_label || bootState.workspace.active_role_label;
-  const maxRoleLabel = roleModeQuery.data?.max_role_label || bootState.workspace.max_role_label;
-  const canSwitchRole = roleModeQuery.data?.can_switch_role || bootState.workspace.can_switch_role;
+  const activeRoleLabel = roleModeQuery.data?.active_role_label ?? shellBootstrap.workspace.active_role_label;
+  const maxRoleLabel = roleModeQuery.data?.max_role_label ?? shellBootstrap.workspace.max_role_label;
+  const canSwitchRole = roleModeQuery.data?.can_switch_role ?? shellBootstrap.workspace.can_switch_role;
 
   const commitLayout = (nextLayout: LayoutPayload) => {
     replaceLayout(nextLayout);
@@ -318,7 +380,7 @@ export function Shell({
 
   const openPanel = (panelId: string, mode: "focus-or-add" | "replace" = "focus-or-add") => {
     commitLayout(
-      openPanelInComposer(currentLayout, panels, {
+      openPanelInComposer(currentLayout, panelRegistry, {
         panelId,
         targetWindowId: composer.focus_window_id,
         axis: compactLayout ? "vertical" : splitDirection,
@@ -328,45 +390,161 @@ export function Shell({
   };
 
   const focusWindow = (windowId: string) => {
-    commitLayout(focusComposerWindow(currentLayout, panels, windowId));
+    commitLayout(focusComposerWindow(currentLayout, panelRegistry, windowId));
   };
 
   const changeWindowPanel = (windowId: string, panelId: string) => {
-    commitLayout(replaceWindowPanel(currentLayout, panels, windowId, panelId));
+    commitLayout(replaceWindowPanel(currentLayout, panelRegistry, windowId, panelId));
   };
 
   const closeWindow = (windowId: string) => {
-    commitLayout(closeComposerWindow(currentLayout, panels, windowId));
+    commitLayout(closeComposerWindow(currentLayout, panelRegistry, windowId));
   };
 
   const toggleSpotlight = (windowId: string) => {
-    commitLayout(toggleSpotlightWindow(currentLayout, panels, windowId));
+    commitLayout(toggleSpotlightWindow(currentLayout, panelRegistry, windowId));
   };
 
   const resizeSplit = (splitId: string, sizes: number[]) => {
-    replaceLayout(resizeComposerSplit(currentLayout, panels, splitId, sizes));
+    replaceLayout(resizeComposerSplit(currentLayout, panelRegistry, splitId, sizes));
   };
 
   const focusPanel = (_pane: PaneId, panelId: string) => {
     openPanel(panelId);
   };
 
-  const openEstimate = (estimateId: number) => {
-    openPanel("estimates-list");
+  const openEstimate = async (estimateId: number, baseLayout?: LayoutPayload) => {
+    let nextLayout = baseLayout ?? currentLayout;
+    nextLayout = openPanelInComposer(nextLayout, panelRegistry, {
+      panelId: "estimates-list",
+      targetWindowId: nextLayout.composer?.focus_window_id,
+      axis: compactLayout ? "vertical" : splitDirection,
+    });
+    commitLayout(nextLayout);
     setSelectedEstimateId(estimateId);
     setSelectedOrderId(null);
+    setSelectedMasterId(null);
+    setSelectedBoardPostId(null);
+    try {
+      const detail = await queryClient.fetchQuery({
+        queryKey: ["estimate-detail", externalUserId, estimateId],
+        queryFn: () => api.getEstimate(externalUserId, estimateId),
+        staleTime: 15_000,
+      });
+      let enriched = nextLayout;
+      if (detail.status === "draft" && detail.capabilities.can_edit) {
+        enriched = openPanelInComposer(enriched, panelRegistry, {
+          panelId: "catalog-browser",
+          targetWindowId: enriched.composer?.focus_window_id,
+          axis: compactLayout ? "vertical" : splitDirection,
+        });
+      }
+      if (detail.status === "approved" && shellBootstrap.capabilities.can_create_order) {
+        enriched = openPanelInComposer(enriched, panelRegistry, {
+          panelId: "orders-list",
+          targetWindowId: enriched.composer?.focus_window_id,
+          axis: compactLayout ? "vertical" : splitDirection,
+        });
+      }
+      if (detail.status === "client_review" && shellBootstrap.notifications.unread > 0) {
+        enriched = openPanelInComposer(enriched, panelRegistry, {
+          panelId: "notifications-list",
+          targetWindowId: enriched.composer?.focus_window_id,
+          axis: compactLayout ? "vertical" : splitDirection,
+        });
+      }
+      commitLayout(enriched);
+      setIntentContext({ kind: "estimate", detail });
+    } catch {
+      setIntentContext(null);
+    }
   };
 
-  const openOrder = (orderId: number) => {
-    openPanel("orders-list");
+  const openOrder = async (orderId: number, baseLayout?: LayoutPayload) => {
+    let nextLayout = baseLayout ?? currentLayout;
+    nextLayout = openPanelInComposer(nextLayout, panelRegistry, {
+      panelId: "orders-list",
+      targetWindowId: nextLayout.composer?.focus_window_id,
+      axis: compactLayout ? "vertical" : splitDirection,
+    });
+    commitLayout(nextLayout);
     setSelectedEstimateId(null);
     setSelectedOrderId(orderId);
+    setSelectedMasterId(null);
+    setSelectedBoardPostId(null);
+    try {
+      const detail = await queryClient.fetchQuery({
+        queryKey: ["order-detail", externalUserId, orderId],
+        queryFn: () => api.getOrder(externalUserId, orderId),
+        staleTime: 15_000,
+      });
+      let enriched = nextLayout;
+      if (detail.estimate?.id) {
+        enriched = openPanelInComposer(enriched, panelRegistry, {
+          panelId: "estimates-list",
+          targetWindowId: enriched.composer?.focus_window_id,
+          axis: compactLayout ? "vertical" : splitDirection,
+        });
+      }
+      if (shellBootstrap.notifications.unread > 0) {
+        enriched = openPanelInComposer(enriched, panelRegistry, {
+          panelId: "notifications-list",
+          targetWindowId: enriched.composer?.focus_window_id,
+          axis: compactLayout ? "vertical" : splitDirection,
+        });
+      }
+      commitLayout(enriched);
+      setIntentContext({ kind: "order", detail });
+    } catch {
+      setIntentContext(null);
+    }
   };
 
-  const handleWorkflowTarget = (callback?: string | null) => {
+  const openProfileScenario = async () => {
+    let nextLayout = currentLayout;
+    nextLayout = openPanelInComposer(nextLayout, panelRegistry, {
+      panelId: "profile-card",
+      targetWindowId: nextLayout.composer?.focus_window_id,
+      axis: compactLayout ? "vertical" : splitDirection,
+    });
+    if (shellBootstrap.capabilities.can_publish_master_profile) {
+      nextLayout = openPanelInComposer(nextLayout, panelRegistry, {
+        panelId: "network-directory",
+        targetWindowId: nextLayout.composer?.focus_window_id,
+        axis: compactLayout ? "vertical" : splitDirection,
+      });
+    }
+    commitLayout(nextLayout);
+    setSelectedEstimateId(null);
+    setSelectedOrderId(null);
+    setSelectedMasterId(null);
+    setSelectedBoardPostId(null);
+    try {
+      const profile = await queryClient.fetchQuery({
+        queryKey: ["profile", externalUserId],
+        queryFn: () => api.getProfile(externalUserId),
+        staleTime: 15_000,
+      });
+      setIntentContext({ kind: "profile", detail: profile });
+    } catch {
+      setIntentContext({ kind: "profile", detail: null });
+    }
+  };
+
+  const handleWorkflowTarget = async (callback?: string | null, options?: { fromNotification?: NotificationItem }) => {
     const parsed = parseWorkflowCallback(callback);
     if (!parsed) {
       return;
+    }
+    let baseLayout = currentLayout;
+    if (options?.fromNotification) {
+      baseLayout = openPanelInComposer(baseLayout, panelRegistry, {
+        panelId: "notifications-list",
+        targetWindowId: baseLayout.composer?.focus_window_id,
+        axis: compactLayout ? "vertical" : splitDirection,
+      });
+      commitLayout(baseLayout);
+      setIntentContext({ kind: "notification", detail: options.fromNotification });
     }
     switch (parsed.type) {
       case "est_view":
@@ -378,7 +556,7 @@ export function Shell({
       case "est_approve":
       case "est_reject":
         if (parsed.id !== null) {
-          openEstimate(parsed.id);
+          await openEstimate(parsed.id, baseLayout);
         } else {
           openPanel("estimates-list");
         }
@@ -391,7 +569,7 @@ export function Shell({
       case "order_pay":
       case "order_cancel":
         if (parsed.id !== null) {
-          openOrder(parsed.id);
+          await openOrder(parsed.id, baseLayout);
         } else {
           openPanel("orders-list");
         }
@@ -406,7 +584,7 @@ export function Shell({
       case "profile":
       case "profile_edit":
       case "profile_requisites":
-        openPanel("profile-card");
+        await openProfileScenario();
         return;
       case "profile_role_mode":
         setRoleDrawerOpen(true);
@@ -446,30 +624,30 @@ export function Shell({
   };
 
   const renderPanel = (panelId: string): ReactNode => {
-    switch (panelId) {
+      switch (panelId) {
       case "board-feed":
-        return <BoardPanel externalUserId={externalUserId} bootstrap={bootState} onOpenResponses={setSelectedBoardPostId} />;
+        return <BoardPanel externalUserId={externalUserId} bootstrap={shellBootstrap} onOpenResponses={setSelectedBoardPostId} />;
       case "network-directory":
         return (
           <NetworkPanel
             externalUserId={externalUserId}
-            bootstrap={bootState}
+            bootstrap={shellBootstrap}
             onOpenMaster={setSelectedMasterId}
-            onOpenProfile={() => openPanel("profile-card")}
+            onOpenProfile={() => void openProfileScenario()}
           />
         );
       case "workspace-overview":
-        return <WorkspacePanel bootstrap={bootState} onFocusPanel={focusPanel} onOpenWorkflow={handleWorkflowTarget} />;
+        return <WorkspacePanel bootstrap={shellBootstrap} onFocusPanel={focusPanel} onOpenWorkflow={handleWorkflowTarget} />;
       case "catalog-browser":
-        return <CatalogPanel externalUserId={externalUserId} canCreateEstimate={bootState.capabilities.can_create_estimate} onOpenEstimate={openEstimate} />;
+        return <CatalogPanel externalUserId={externalUserId} canCreateEstimate={shellBootstrap.capabilities.can_create_estimate} onOpenEstimate={openEstimate} />;
       case "estimates-list":
-        return <EstimatesPanel externalUserId={externalUserId} canCreateEstimate={bootState.capabilities.can_create_estimate} onOpenEstimate={openEstimate} />;
+        return <EstimatesPanel externalUserId={externalUserId} canCreateEstimate={shellBootstrap.capabilities.can_create_estimate} onOpenEstimate={openEstimate} />;
       case "orders-list":
         return <OrdersPanel externalUserId={externalUserId} onOpenOrder={openOrder} />;
       case "notifications-list":
-        return <NotificationsPanel externalUserId={externalUserId} onOpenTarget={handleWorkflowTarget} />;
+        return <NotificationsPanel externalUserId={externalUserId} onOpenTarget={(notification) => void handleWorkflowTarget(notification.target_callback, { fromNotification: notification })} />;
       case "profile-card":
-        return <ProfilePanel externalUserId={externalUserId} canPublishMasterProfile={bootState.capabilities.can_publish_master_profile} />;
+        return <ProfilePanel externalUserId={externalUserId} canPublishMasterProfile={shellBootstrap.capabilities.can_publish_master_profile} />;
       case "control-center":
         return <ControlCenterPanel externalUserId={externalUserId} />;
       case "approvals-queue":
@@ -482,6 +660,11 @@ export function Shell({
   };
 
   const handlePresetSelect = (presetId: string) => {
+    setIntentContext(null);
+    setSelectedEstimateId(null);
+    setSelectedOrderId(null);
+    setSelectedMasterId(null);
+    setSelectedBoardPostId(null);
     void presetMutation.mutateAsync(presetId);
   };
 
@@ -491,7 +674,37 @@ export function Shell({
   };
 
   const handleOpenProfile = () => {
-    openPanel("profile-card");
+    void openProfileScenario();
+  };
+
+  const handleIntentRecommendation = (recommendation: ComposerRecommendation) => {
+    if (recommendation.workflowCallback) {
+      void handleWorkflowTarget(recommendation.workflowCallback);
+      return;
+    }
+    if (typeof recommendation.orderId === "number") {
+      void openOrder(recommendation.orderId);
+      return;
+    }
+    if (typeof recommendation.estimateId === "number") {
+      void openEstimate(recommendation.estimateId);
+      return;
+    }
+    if (recommendation.profileScenario) {
+      void openProfileScenario();
+      return;
+    }
+    openPanel(recommendation.panelId, recommendation.mode ?? "focus-or-add");
+  };
+
+  const handleCloseEstimate = () => {
+    setSelectedEstimateId(null);
+    setIntentContext((current) => (current?.kind === "estimate" ? null : current));
+  };
+
+  const handleCloseOrder = () => {
+    setSelectedOrderId(null);
+    setIntentContext((current) => (current?.kind === "order" ? null : current));
   };
 
   return (
@@ -501,7 +714,7 @@ export function Shell({
 
       <SpotlightHero
         auth={auth}
-        bootstrap={bootState}
+        bootstrap={shellBootstrap}
         activeRoleLabel={activeRoleLabel}
         maxRoleLabel={maxRoleLabel}
         canSwitchRole={canSwitchRole}
@@ -514,18 +727,31 @@ export function Shell({
 
       <main className={`workspace-frame composer-frame ${compactLayout ? "compact-workspace" : ""}`} data-testid="workspace-frame">
         <section className="workspace-intent glass-card">
-          <div>
-            <strong>Живой composer</strong>
-            <p>Обычный тап переключает режим, удержание добавляет новое окно рядом, двойной тап по заголовку окна включает фокус.</p>
+          <div className="workspace-intent-copy">
+            <strong>{intentSurface.title}</strong>
+            <p>{intentSurface.body}</p>
           </div>
-          <button className="btn" type="button" onClick={() => openPalette("open")}>
-            Добавить модуль
-          </button>
+          <div className="workspace-intent-actions">
+            {intentSurface.recommendations.map((recommendation) => (
+              <button
+                key={recommendation.id}
+                className={`btn ${intentSurface.recommendations[0]?.id === recommendation.id ? "btn-primary" : ""}`}
+                type="button"
+                title={recommendation.title}
+                onClick={() => handleIntentRecommendation(recommendation)}
+              >
+                {recommendation.label}
+              </button>
+            ))}
+            <button className="btn" type="button" onClick={() => openPalette("open")}>
+              Добавить модуль
+            </button>
+          </div>
         </section>
 
         <WindowComposer
           layout={currentLayout}
-          panels={panels}
+          panels={panelRegistry}
           compact={compactLayout}
           activeCompactWindowId={activeCompactWindowId || composer.focus_window_id}
           onSelectCompactWindow={setActiveCompactWindowId}
@@ -579,7 +805,7 @@ export function Shell({
 
       <CommandPalette
         open={commandOpen}
-        panels={panels}
+        panels={panelRegistry}
         compact={compactLayout}
         mode={paletteMode}
         onModeChange={setPaletteMode}
@@ -599,11 +825,11 @@ export function Shell({
       <EstimateDrawer
         externalUserId={externalUserId}
         estimateId={selectedEstimateId}
-        onClose={() => setSelectedEstimateId(null)}
+        onClose={handleCloseEstimate}
         onFocusPanel={focusPanel}
         onOpenOrder={openOrder}
       />
-      <OrderDrawer externalUserId={externalUserId} orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />
+      <OrderDrawer externalUserId={externalUserId} orderId={selectedOrderId} onClose={handleCloseOrder} />
     </div>
   );
 }
