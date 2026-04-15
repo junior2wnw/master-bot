@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import structlog
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.admin import router as admin_router
@@ -99,6 +99,23 @@ def create_app() -> FastAPI:
     app.include_router(max_webhook_router)
     app.include_router(v1_router)
     app.include_router(superapp_router)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    @app.head("/favicon.ico", include_in_schema=False)
+    async def favicon_placeholder() -> Response:
+        """Silence default browser favicon probes without surfacing 404 noise."""
+        return Response(status_code=204)
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    @app.head("/apple-touch-icon.png", include_in_schema=False)
+    async def apple_touch_icon_placeholder() -> Response:
+        """Avoid noisy mobile icon probes until branded asset pipeline is added."""
+        return Response(status_code=204)
+
+    @app.get("/robots.txt", include_in_schema=False)
+    async def robots_txt() -> PlainTextResponse:
+        """Serve a safe default robots policy for the public Mini App host."""
+        return PlainTextResponse("User-agent: *\nAllow: /\n")
 
     # Serve Mini App static files
     webapp_dir = pathlib.Path(__file__).parent / "webapp"

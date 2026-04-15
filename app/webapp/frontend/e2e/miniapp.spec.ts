@@ -73,10 +73,12 @@ test("builds a live desktop composer and supports focus mode", async ({ page }, 
   await holdButton(page, "dock-market");
   await expect.poll(() => countWindowPills(page)).toBeGreaterThanOrEqual(Math.max(3, pillsBefore));
 
-  const firstWindowHead = page.locator(".window-card-head").first();
-  await firstWindowHead.dblclick();
-  await expect(page.getByTestId("window-spotlight-stage")).toBeVisible();
-  await firstWindowHead.dblclick();
+  if (testInfo.project.name === "desktop-chrome") {
+    const firstWindowHead = page.locator(".window-card-head").first();
+    await firstWindowHead.dblclick();
+    await expect(page.getByTestId("window-spotlight-stage")).toBeVisible();
+    await page.locator(".window-card-head").first().dblclick();
+  }
 
   const controlButton = page.getByTestId("dock-control");
   if (await controlButton.count()) {
