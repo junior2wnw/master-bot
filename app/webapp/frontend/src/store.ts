@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
-import type { BootstrapResponse, LayoutPayload, PaneId, PanelMeta, PresetMeta } from "./types";
+import type { BootstrapResponse, LayoutPayload, PanelMeta, PresetMeta } from "./types";
+import { ensureComposerLayout } from "./windowLayout";
 
 interface WorkspaceState {
   layout: LayoutPayload | null;
@@ -10,8 +11,7 @@ interface WorkspaceState {
   commandOpen: boolean;
   hydrateFromBootstrap: (bootstrap: BootstrapResponse) => void;
   replaceLayout: (layout: LayoutPayload) => void;
-  setPanePanel: (pane: PaneId, panelId: string) => void;
-  setRatio: (ratio: number) => void;
+  updateLayout: (updater: (layout: LayoutPayload) => LayoutPayload) => void;
   setCommandOpen: (value: boolean) => void;
 }
 
@@ -24,36 +24,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   hydrateFromBootstrap: (bootstrap) =>
     set({
       bootstrap,
-      layout: bootstrap.layout,
+      layout: ensureComposerLayout(bootstrap.layout, bootstrap.panels),
       panels: bootstrap.panels,
       presets: bootstrap.presets,
     }),
-  replaceLayout: (layout) => set({ layout }),
-  setPanePanel: (pane, panelId) =>
+  replaceLayout: (layout) =>
     set((state) => {
-      if (!state.layout) {
-        return state;
+      if (!state.panels.length) {
+        return { layout };
       }
       return {
-        layout: {
-          ...state.layout,
-          panes: {
-            ...state.layout.panes,
-            [pane]: panelId,
-          },
-        },
+        layout: ensureComposerLayout(layout, state.panels),
       };
     }),
-  setRatio: (ratio) =>
+  updateLayout: (updater) =>
     set((state) => {
       if (!state.layout) {
         return state;
       }
       return {
-        layout: {
-          ...state.layout,
-          ratio,
-        },
+        layout: ensureComposerLayout(updater(state.layout), state.panels),
       };
     }),
   setCommandOpen: (value) => set({ commandOpen: value }),

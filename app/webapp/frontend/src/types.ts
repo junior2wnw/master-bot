@@ -55,6 +55,30 @@ export interface PresetMeta {
   subtitle: string;
 }
 
+export type ComposerAxis = "horizontal" | "vertical";
+
+export interface ComposerWindowNode {
+  id: string;
+  kind: "window";
+  panel_id: string;
+}
+
+export interface ComposerSplitNode {
+  id: string;
+  kind: "split";
+  axis: ComposerAxis;
+  children: ComposerNode[];
+  sizes: number[];
+}
+
+export type ComposerNode = ComposerWindowNode | ComposerSplitNode;
+
+export interface ComposerLayout {
+  root: ComposerNode;
+  focus_window_id: string;
+  spotlight_window_id: string | null;
+}
+
 export interface LayoutPayload {
   version: number;
   preset: string;
@@ -67,6 +91,7 @@ export interface LayoutPayload {
     density: "compact" | "cozy";
     dock_compact: boolean;
   };
+  composer?: ComposerLayout;
 }
 
 export interface JobPost {

@@ -22,34 +22,21 @@ async function attachRuntimeWatchers(page: Page) {
   return issues;
 }
 
-async function readPaneGeometry(page: Page) {
-  return page.evaluate(() => {
-    const group = document.querySelector('[data-testid="workspace-frame"] > *');
-    const pick = (selector: string) => {
-      const node = document.querySelector(selector);
-      if (!node) {
-        return null;
-      }
-      const rect = node.getBoundingClientRect();
-      return {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-      };
-    };
+async function holdButton(page: Page, testId: string) {
+  const target = page.getByTestId(testId);
+  await expect(target).toBeVisible();
+  const box = await target.boundingBox();
+  if (!box) {
+    throw new Error(`Unable to resolve ${testId} bounding box.`);
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(450);
+  await page.mouse.up();
+}
 
-    return {
-      viewport: {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      },
-      groupFlow: group instanceof HTMLElement ? group.style.flexFlow : "",
-      top: pick('[data-testid="pane-surface-top"]'),
-      bottom: pick('[data-testid="pane-surface-bottom"]'),
-      dock: pick('[data-testid="workspace-dock"]'),
-    };
-  });
+async function countWindowPills(page: Page): Promise<number> {
+  return page.locator('[data-testid^="window-pill-"]').count();
 }
 
 test("shows a clean launch gate in a normal browser", async ({ page }, testInfo) => {
@@ -67,7 +54,7 @@ test("shows a clean launch gate in a normal browser", async ({ page }, testInfo)
   expect(runtimeIssues).toEqual([]);
 });
 
-test("loads the authenticated desktop shell and opens operations", async ({ page }, testInfo) => {
+test("builds a live desktop composer and supports focus mode", async ({ page }, testInfo) => {
   test.skip(!process.env.MAX_BOT_TOKEN, "MAX_BOT_TOKEN is not available for authenticated checks.");
   const runtimeIssues = await attachRuntimeWatchers(page);
 
@@ -75,38 +62,21 @@ test("loads the authenticated desktop shell and opens operations", async ({ page
 
   await expect(page.getByTestId("superapp-shell")).toBeVisible();
   await expect(page.getByTestId("spotlight-hero")).toBeVisible();
+  await expect(page.getByTestId("window-composer")).toBeVisible();
+  await expect(page.getByTestId("window-rail")).toBeVisible();
   await expect(page.getByTestId("workspace-dock")).toBeVisible();
-  await page.getByTestId("dock-market").click();
 
-  const geometry = await readPaneGeometry(page);
-  expect(geometry.dock).not.toBeNull();
+  await page.getByTestId("dock-workbench").click();
+  await expect(page.getByText("Живой composer")).toBeVisible();
 
-  if (geometry.viewport.width >= 1040) {
-    await expect(page.getByTestId("board-panel")).toBeVisible();
-    const bottomPane = page.getByTestId("pane-surface-bottom");
-    await bottomPane.locator(".pane-head select").selectOption("network-directory");
-    await expect(page.getByTestId("network-panel")).toBeVisible();
-    expect(geometry.top).not.toBeNull();
-    expect(geometry.bottom).not.toBeNull();
-    expect(geometry.groupFlow).toContain("row");
-    expect(geometry.bottom!.x).toBeGreaterThan(geometry.top!.x + 24);
-  } else {
-    await expect(page.getByTestId("mobile-pane-switcher")).toBeVisible();
-    await expect(page.getByTestId("pane-surface-top")).toBeVisible();
-    await expect(page.getByTestId("board-panel")).toBeVisible();
-    await page.getByTestId("mobile-pane-tab-bottom").click();
-    await expect(page.getByTestId("pane-surface-bottom")).toBeVisible();
-    expect(geometry.dock!.y).toBeLessThanOrEqual(geometry.viewport.height);
-  }
+  const pillsBefore = await countWindowPills(page);
+  await holdButton(page, "dock-market");
+  await expect.poll(() => countWindowPills(page)).toBeGreaterThanOrEqual(Math.max(3, pillsBefore));
 
-  const roleButton = page.getByTestId("hero-open-role-mode");
-  if (await roleButton.count()) {
-    await roleButton.click();
-    const roleDrawer = page.getByTestId("role-mode-drawer");
-    await expect(roleDrawer).toBeVisible();
-    await roleDrawer.locator(".btn").click();
-    await expect(roleDrawer).toBeHidden();
-  }
+  const firstWindowHead = page.locator(".window-card-head").first();
+  await firstWindowHead.dblclick();
+  await expect(page.getByTestId("window-spotlight-stage")).toBeVisible();
+  await firstWindowHead.dblclick();
 
   const controlButton = page.getByTestId("dock-control");
   if (await controlButton.count()) {
@@ -115,38 +85,37 @@ test("loads the authenticated desktop shell and opens operations", async ({ page
   }
 
   await page.screenshot({
-    path: testInfo.outputPath("desktop-shell.png"),
+    path: testInfo.outputPath("desktop-composer.png"),
     fullPage: true,
   });
 
   expect(runtimeIssues).toEqual([]);
 });
 
-test("keeps the mobile shell readable and dock-first", async ({ page }, testInfo) => {
+test("keeps the compact composer readable on mobile", async ({ page }, testInfo) => {
   test.skip(!process.env.MAX_BOT_TOKEN, "MAX_BOT_TOKEN is not available for authenticated checks.");
   test.skip(testInfo.project.name !== "mobile-chrome", "mobile readability is validated only on the mobile project.");
   const runtimeIssues = await attachRuntimeWatchers(page);
 
   await page.goto(signedEntryPath(), { waitUntil: "domcontentloaded" });
-  await page.getByTestId("dock-market").click();
+  await page.getByTestId("dock-workbench").click();
 
   await expect(page.getByTestId("superapp-shell")).toBeVisible();
-  await expect(page.getByTestId("spotlight-hero")).toBeVisible();
-  await expect(page.getByTestId("mobile-pane-switcher")).toBeVisible();
-  await expect(page.getByTestId("pane-surface-top")).toBeVisible();
-  await expect(page.getByTestId("board-panel")).toBeVisible();
+  await expect(page.getByTestId("window-composer")).toBeVisible();
+  await expect(page.getByTestId("window-composer-compact-stage")).toBeVisible();
+  await expect(page.getByTestId("window-rail")).toBeVisible();
   await expect(page.getByTestId("workspace-dock")).toBeVisible();
 
-  const geometry = await readPaneGeometry(page);
-  expect(geometry.viewport.width).toBeLessThan(1040);
-  expect(geometry.top).not.toBeNull();
-  expect(geometry.dock).not.toBeNull();
-  await page.getByTestId("mobile-pane-tab-bottom").click();
-  await expect(page.getByTestId("pane-surface-bottom")).toBeVisible();
-  expect(geometry.dock!.y).toBeLessThanOrEqual(geometry.viewport.height);
+  const pillsBefore = await countWindowPills(page);
+  await holdButton(page, "dock-market");
+  await expect.poll(() => countWindowPills(page)).toBeGreaterThanOrEqual(Math.max(3, pillsBefore));
+
+  const railPills = page.locator('[data-testid^="window-pill-"]');
+  await railPills.nth(0).click();
+  await expect(page.locator(".window-card").first()).toBeVisible();
 
   await page.screenshot({
-    path: testInfo.outputPath("mobile-shell.png"),
+    path: testInfo.outputPath("mobile-composer.png"),
     fullPage: true,
   });
 

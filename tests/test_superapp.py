@@ -75,14 +75,78 @@ async def test_save_workspace_layout_sanitizes_payload(monkeypatch):
         )
 
         assert saved["ratio"] == 70.0
+        assert saved["version"] == 2
         assert saved["panes"]["top"] == "board-feed"
         assert saved["panes"]["bottom"] == "network-directory"
         assert saved["chrome"]["density"] == "cozy"
+        assert saved["composer"]["root"]["kind"] == "split"
+        assert saved["composer"]["focus_window_id"] == "window-top"
 
         persisted = (
             await session.execute(select(WorkspaceLayout).where(WorkspaceLayout.user_id == user.id))
         ).scalar_one()
         assert persisted.preset_code == "market"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_save_workspace_layout_preserves_nested_composer(monkeypatch):
+    engine, session_factory = await _make_session_factory()
+    monkeypatch.setattr(superapp_svc, "log_audit", _noop)
+
+    async with session_factory() as session:
+        user = User(telegram_id=1002, first_name="Client")
+        session.add(user)
+        await session.flush()
+        session.add(UserRole(user_id=user.id, role_code="client"))
+        await session.flush()
+        await session.refresh(user, ["roles"])
+
+        saved = await superapp_svc.save_workspace_layout(
+            session,
+            user=user,
+            preset_code="market",
+            payload={
+                "ratio": 58,
+                "panes": {"top": "board-feed", "bottom": "network-directory"},
+                "composer": {
+                    "root": {
+                        "id": "root@bad",
+                        "kind": "split",
+                        "axis": "horizontal",
+                        "children": [
+                            {"id": "board", "kind": "window", "panel_id": "board-feed"},
+                            {
+                                "id": "network-stack",
+                                "kind": "split",
+                                "axis": "vertical",
+                                "children": [
+                                    {"id": "orders", "kind": "window", "panel_id": "orders-list"},
+                                    {"id": "orders", "kind": "window", "panel_id": "profile-card"},
+                                ],
+                                "sizes": [62, 38],
+                            },
+                        ],
+                        "sizes": [55, 45],
+                    },
+                    "focus_window_id": "orders",
+                    "spotlight_window_id": "missing",
+                },
+            },
+        )
+
+        composer = saved["composer"]
+        leaf_ids = superapp_svc._collect_window_ids(composer["root"])
+
+        assert composer["root"]["kind"] == "split"
+        assert composer["root"]["axis"] == "horizontal"
+        assert len(leaf_ids) == 3
+        assert len(set(leaf_ids)) == len(leaf_ids)
+        assert composer["focus_window_id"] in leaf_ids
+        assert composer["spotlight_window_id"] is None
+        assert composer["root"]["children"][1]["kind"] == "split"
+        assert composer["root"]["children"][1]["sizes"] == [62.0, 38.0]
 
     await engine.dispose()
 

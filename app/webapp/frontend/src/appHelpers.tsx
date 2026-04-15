@@ -385,9 +385,9 @@ export function SpotlightHero({
   onOpenProfile: () => void;
 }) {
   const summaryCards = [
-    { label: compact ? "Заявки" : "Заказы на рынке", value: bootstrap.board.total },
+    { label: compact ? "Спрос" : "Заказы на рынке", value: bootstrap.board.total },
     { label: compact ? "Мастера" : "Мастеров в сети", value: bootstrap.network.total },
-    { label: compact ? "Заказы" : "Активных заказов", value: bootstrap.workspace.active_orders },
+    { label: compact ? "Работа" : "Активных заказов", value: bootstrap.workspace.active_orders },
     { label: "Сигналы", value: bootstrap.notifications.unread },
   ];
   const compactSummaryCards = compact ? summaryCards.filter((card) => card.value > 0).slice(0, 3) : summaryCards;
@@ -404,11 +404,11 @@ export function SpotlightHero({
           </div>
         </div>
         <div className="hero-copy">
-          <h2>{compact ? "Найти мастера и закрыть задачу без лишних экранов" : "Одна простая среда для спроса, мастеров и выполнения работ"}</h2>
+          <h2>{compact ? "Окна под рукой, а не лишние экраны" : "Светлый composer для спроса, мастеров и выполнения работ"}</h2>
           <p>
             {compact
-              ? "Рынок и работа разведены понятно: меньше поиска, меньше лишних нажатий."
-              : "Слева и справа не хаос из экранов, а живой рынок: людям легче оставить заявку, мастерам легче показать себя и быстрее взять работу."}
+              ? "Тап переключает режим. Удержание добавляет окно рядом. Двойной тап по заголовку включает фокус."
+              : "ПриДел собирается как живая рабочая поверхность: рынок, сеть мастеров и операционные потоки открываются окнами и не ломают общий контекст."}
           </p>
         </div>
         <div className={`hero-actions ${compact ? "hero-actions-compact" : ""}`}>

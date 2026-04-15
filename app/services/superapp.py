@@ -28,6 +28,9 @@ ACTIVE_JOB_RESPONSE_STATUSES = {"submitted", "shortlisted", "accepted"}
 PROVIDER_ROLE_CODES = {"master", "senior_master"}
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 REVIEWABLE_ORDER_STATUSES = {"completed", "paid"}
+MAX_LAYOUT_DEPTH = 5
+MAX_LAYOUT_WINDOWS = 8
+MAX_LAYOUT_CHILDREN = 4
 
 PANEL_DEFINITIONS = (
     {
@@ -239,8 +242,8 @@ def _default_layout_for_preset(user: User, preset_code: str | None) -> dict:
     if selected is None:
         selected = next(preset for preset in PRESET_DEFINITIONS if preset["id"] in available_presets)
 
-    return {
-        "version": 1,
+    layout = {
+        "version": 2,
         "preset": selected["id"],
         "ratio": float(selected["default_ratio"]),
         "panes": {
@@ -251,6 +254,165 @@ def _default_layout_for_preset(user: User, preset_code: str | None) -> dict:
             "density": "cozy",
             "dock_compact": False,
         },
+    }
+    layout["composer"] = _default_composer_from_layout(layout)
+    return layout
+
+
+def _normalize_layout_sizes(values: list[float] | None, count: int) -> list[float]:
+    if count <= 0:
+        return []
+    if not isinstance(values, list) or len(values) != count:
+        even = round(100 / count, 1)
+        sizes = [even for _ in range(count)]
+        sizes[-1] = round(100 - sum(sizes[:-1]), 1)
+        return sizes
+
+    cleaned: list[float] = []
+    for value in values:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = 100 / count
+        cleaned.append(max(12.0, numeric))
+
+    total = sum(cleaned)
+    if total <= 0:
+        even = round(100 / count, 1)
+        sizes = [even for _ in range(count)]
+        sizes[-1] = round(100 - sum(sizes[:-1]), 1)
+        return sizes
+
+    normalized = [round((value / total) * 100, 1) for value in cleaned]
+    normalized[-1] = round(normalized[-1] + (100 - sum(normalized)), 1)
+    return normalized
+
+
+def _default_composer_from_layout(layout: dict) -> dict:
+    return {
+        "root": {
+            "id": "split-root",
+            "kind": "split",
+            "axis": "vertical",
+            "children": [
+                {
+                    "id": "window-top",
+                    "kind": "window",
+                    "panel_id": layout["panes"]["top"],
+                },
+                {
+                    "id": "window-bottom",
+                    "kind": "window",
+                    "panel_id": layout["panes"]["bottom"],
+                },
+            ],
+            "sizes": [
+                round(float(layout["ratio"]), 1),
+                round(100 - float(layout["ratio"]), 1),
+            ],
+        },
+        "focus_window_id": "window-top",
+        "spotlight_window_id": None,
+    }
+
+
+def _collect_window_ids(node: dict) -> list[str]:
+    if node.get("kind") == "window":
+        return [str(node.get("id"))]
+    result: list[str] = []
+    for child in node.get("children", []):
+        if isinstance(child, dict):
+            result.extend(_collect_window_ids(child))
+    return result
+
+
+def _sanitize_composer_layout(raw: dict | None, *, allowed_panels: list[str], fallback_layout: dict) -> dict:
+    fallback = _default_composer_from_layout(fallback_layout)
+    if not isinstance(raw, dict):
+        return fallback
+
+    state = {"counter": 0, "windows": 0}
+    used_ids: set[str] = set()
+    fallback_panel = fallback_layout["panes"]["top"]
+
+    def _next_id(prefix: str) -> str:
+        state["counter"] += 1
+        return f"{prefix}-{state['counter']}"
+
+    def _safe_id(raw_id: object, prefix: str) -> str:
+        if isinstance(raw_id, str):
+            cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", raw_id)[:48]
+            if cleaned and cleaned not in used_ids:
+                used_ids.add(cleaned)
+                return cleaned
+        generated = _next_id(prefix)
+        used_ids.add(generated)
+        return generated
+
+    def _sanitize_node(node: dict | None, depth: int = 0) -> dict:
+        if not isinstance(node, dict) or depth > MAX_LAYOUT_DEPTH:
+            state["windows"] += 1
+            return {
+                "id": _safe_id(None, "window"),
+                "kind": "window",
+                "panel_id": fallback_panel,
+            }
+
+        if node.get("kind") == "split":
+            axis = node.get("axis")
+            if axis not in {"horizontal", "vertical"}:
+                axis = "horizontal"
+
+            children_raw = node.get("children") if isinstance(node.get("children"), list) else []
+            children: list[dict] = []
+            for child in children_raw[:MAX_LAYOUT_CHILDREN]:
+                if state["windows"] >= MAX_LAYOUT_WINDOWS:
+                    break
+                children.append(_sanitize_node(child, depth + 1))
+
+            if len(children) < 2:
+                state["windows"] += 1
+                return {
+                    "id": _safe_id(node.get("id"), "window"),
+                    "kind": "window",
+                    "panel_id": fallback_panel,
+                }
+
+            return {
+                "id": _safe_id(node.get("id"), "split"),
+                "kind": "split",
+                "axis": axis,
+                "children": children,
+                "sizes": _normalize_layout_sizes(node.get("sizes"), len(children)),
+            }
+
+        panel_id = node.get("panel_id")
+        if panel_id not in allowed_panels:
+            panel_id = fallback_panel
+        state["windows"] += 1
+        return {
+            "id": _safe_id(node.get("id"), "window"),
+            "kind": "window",
+            "panel_id": panel_id,
+        }
+
+    root = _sanitize_node(raw.get("root"))
+    leaf_ids = _collect_window_ids(root)
+    if not leaf_ids:
+        return fallback
+
+    focus_window_id = raw.get("focus_window_id")
+    if focus_window_id not in leaf_ids:
+        focus_window_id = leaf_ids[0]
+
+    spotlight_window_id = raw.get("spotlight_window_id")
+    if spotlight_window_id not in leaf_ids:
+        spotlight_window_id = None
+
+    return {
+        "root": root,
+        "focus_window_id": focus_window_id,
+        "spotlight_window_id": spotlight_window_id,
     }
 
 
@@ -282,8 +444,8 @@ def sanitize_layout_payload(user: User, payload: dict | None, preset_code: str |
     if density not in {"compact", "cozy"}:
         density = fallback["chrome"]["density"]
 
-    return {
-        "version": 1,
+    layout = {
+        "version": 2,
         "preset": fallback["preset"],
         "ratio": ratio,
         "panes": {
@@ -295,6 +457,12 @@ def sanitize_layout_payload(user: User, payload: dict | None, preset_code: str |
             "dock_compact": bool(chrome_payload.get("dock_compact", False)),
         },
     }
+    layout["composer"] = _sanitize_composer_layout(
+        payload.get("composer") if isinstance(payload, dict) else None,
+        allowed_panels=sorted(allowed_panels),
+        fallback_layout=layout,
+    )
+    return layout
 
 
 async def get_workspace_layout(

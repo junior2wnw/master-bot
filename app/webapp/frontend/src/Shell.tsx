@@ -1,41 +1,63 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Group, Panel, Separator } from "react-resizable-panels";
 
-import { ControlCenterPanel } from "./ControlCenterPanel";
-import { useWorkspaceStore } from "./store";
-import { BoardPanel, NetworkPanel } from "./marketPanels";
-import { WorkspacePanel, CatalogPanel, EstimatesPanel, OrdersPanel, NotificationsPanel, ApprovalsPanel, AnalyticsPanel } from "./workPanels";
-import { ProfilePanel } from "./profilePanel";
-import { BoardResponsesDrawer, MasterDrawer, RoleModeDrawer } from "./marketDrawers";
-import { EstimateDrawer } from "./estimateDrawer";
-import { OrderDrawer } from "./orderDrawer";
+import { api } from "./api";
 import {
   EmptyState,
-  Glyph,
-  PanelPicker,
   SpotlightHero,
   errorMessage,
-  paneLabel,
   parseWorkflowCallback,
   useCompactLayout,
   useSplitDirection,
 } from "./appHelpers";
-import { api } from "./api";
-import type { BootstrapResponse, PaneId, PanelMeta, RoleModeResponse } from "./types";
+import { ControlCenterPanel } from "./ControlCenterPanel";
+import { EstimateDrawer } from "./estimateDrawer";
+import { BoardResponsesDrawer, MasterDrawer, RoleModeDrawer } from "./marketDrawers";
+import { BoardPanel, NetworkPanel } from "./marketPanels";
+import { OrderDrawer } from "./orderDrawer";
+import { ProfilePanel } from "./profilePanel";
+import { useWorkspaceStore } from "./store";
+import type { BootstrapResponse, LayoutPayload, PaneId, PanelMeta, RoleModeResponse } from "./types";
+import { WindowComposer } from "./windowComposer";
+import {
+  closeComposerWindow,
+  ensureComposerLayout,
+  focusComposerWindow,
+  listComposerWindows,
+  openPanelInComposer,
+  replaceWindowPanel,
+  resizeComposerSplit,
+  toggleSpotlightWindow,
+} from "./windowLayout";
+import {
+  AnalyticsPanel,
+  ApprovalsPanel,
+  CatalogPanel,
+  EstimatesPanel,
+  NotificationsPanel,
+  OrdersPanel,
+  WorkspacePanel,
+} from "./workPanels";
+
+type PaletteMode = "open" | "replace";
 
 function CommandPalette({
   open,
   panels,
+  compact,
+  mode,
+  onModeChange,
   onClose,
   onSelect,
 }: {
   open: boolean;
   panels: PanelMeta[];
+  compact: boolean;
+  mode: PaletteMode;
+  onModeChange: (mode: PaletteMode) => void;
   onClose: () => void;
-  onSelect: (pane: PaneId, panelId: string) => void;
+  onSelect: (panelId: string, mode: PaletteMode) => void;
 }) {
-  const [targetPane, setTargetPane] = useState<PaneId>("top");
   const grouped = useMemo(
     () =>
       panels.reduce<Record<string, PanelMeta[]>>((acc, panel) => {
@@ -55,19 +77,23 @@ function CommandPalette({
       <div className="palette" data-testid="command-palette" onClick={(event) => event.stopPropagation()}>
         <div className="palette-head">
           <div>
-            <h3>Рабочие модули</h3>
-            <p>Подключайте нужные функции в нужную половину экрана, не теряя общий контекст.</p>
+            <h3>Сборка пространства</h3>
+            <p>
+              {compact
+                ? "Откройте модуль в текущем фокусе или замените активный экран без лишнего меню."
+                : "Откройте модуль как новое окно в composer или замените активное окно, если нужен быстрый поворот контекста."}
+            </p>
           </div>
           <button className="btn" onClick={onClose}>
             Закрыть
           </button>
         </div>
         <div className="segmented">
-          <button className={`segment ${targetPane === "top" ? "active" : ""}`} onClick={() => setTargetPane("top")}>
-            Верхняя половина
+          <button className={`segment ${mode === "open" ? "active" : ""}`} onClick={() => onModeChange("open")}>
+            {compact ? "Открыть" : "Открыть окном"}
           </button>
-          <button className={`segment ${targetPane === "bottom" ? "active" : ""}`} onClick={() => setTargetPane("bottom")}>
-            Нижняя половина
+          <button className={`segment ${mode === "replace" ? "active" : ""}`} onClick={() => onModeChange("replace")}>
+            Заменить фокус
           </button>
         </div>
         <div className="palette-groups">
@@ -85,7 +111,7 @@ function CommandPalette({
                     key={item.id}
                     className="glass-card compact-card card-button align-start"
                     onClick={() => {
-                      onSelect(targetPane, item.id);
+                      onSelect(item.id, mode);
                       onClose();
                     }}
                   >
@@ -107,74 +133,63 @@ function CommandPalette({
   );
 }
 
-function PaneSurface({
-  paneId,
-  panelId,
-  title,
-  icon,
-  direction,
-  compact,
-  panels,
-  onChange,
-  children,
+function DockActionButton({
+  testId,
+  label,
+  strong,
+  onTap,
+  onHold,
 }: {
-  paneId: PaneId;
-  panelId: string;
-  title: string;
-  icon: string;
-  direction: "horizontal" | "vertical";
-  compact?: boolean;
-  panels: PanelMeta[];
-  onChange: (pane: PaneId, panelId: string) => void;
-  children: ReactNode;
+  testId: string;
+  label: string;
+  strong?: boolean;
+  onTap: () => void;
+  onHold?: () => void;
 }) {
-  return (
-    <section className={`pane-surface ${compact ? "compact-pane" : ""}`} data-testid={`pane-surface-${paneId}`} data-panel-id={panelId}>
-      <header className="pane-head">
-        <div className="pane-title">
-          <span className="glyph-shell">
-            <Glyph name={icon} />
-          </span>
-          <div>
-            {!compact ? <span className="pane-label">{paneLabel(paneId, direction)}</span> : null}
-            <h2>{title}</h2>
-          </div>
-        </div>
-        <PanelPicker value={panelId} options={panels} onChange={(next) => onChange(paneId, next)} />
-      </header>
-      <div className="pane-content">{children}</div>
-    </section>
-  );
-}
+  const timerRef = useRef<number | null>(null);
+  const holdTriggeredRef = useRef(false);
 
-function MobilePaneSwitcher({
-  activePane,
-  topMeta,
-  bottomMeta,
-  onSelect,
-}: {
-  activePane: PaneId;
-  topMeta: PanelMeta;
-  bottomMeta: PanelMeta;
-  onSelect: (pane: PaneId) => void;
-}) {
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handlePointerDown = () => {
+    holdTriggeredRef.current = false;
+    if (!onHold) {
+      return;
+    }
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      holdTriggeredRef.current = true;
+      onHold();
+    }, 380);
+  };
+
+  const handlePointerUp = () => {
+    clearTimer();
+    if (holdTriggeredRef.current) {
+      holdTriggeredRef.current = false;
+      return;
+    }
+    onTap();
+  };
+
   return (
-    <div className="mobile-pane-switcher" data-testid="mobile-pane-switcher">
-      {[
-        { paneId: "top" as const, meta: topMeta },
-        { paneId: "bottom" as const, meta: bottomMeta },
-      ].map((item) => (
-        <button
-          key={item.paneId}
-          type="button"
-          className={`mobile-pane-tab ${activePane === item.paneId ? "active" : ""}`}
-          data-testid={`mobile-pane-tab-${item.paneId}`}
-          onClick={() => onSelect(item.paneId)}
-        >
-          <strong>{item.meta.title}</strong>
-        </button>
-      ))}
-    </div>
+    <button
+      type="button"
+      data-testid={testId}
+      className={`dock-btn ${strong ? "strong" : ""}`}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={clearTimer}
+      onPointerCancel={clearTimer}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -189,45 +204,36 @@ export function Shell({
   const queryClient = useQueryClient();
   const splitDirection = useSplitDirection();
   const compactLayout = useCompactLayout();
-  const {
-    layout,
-    panels,
-    presets,
-    bootstrap: bootState,
-    commandOpen,
-    hydrateFromBootstrap,
-    replaceLayout,
-    setPanePanel,
-    setRatio,
-    setCommandOpen,
-  } = useWorkspaceStore();
+  const { layout, panels, presets, bootstrap: bootState, commandOpen, hydrateFromBootstrap, replaceLayout, setCommandOpen } = useWorkspaceStore();
   const [selectedMasterId, setSelectedMasterId] = useState<number | null>(null);
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [selectedBoardPostId, setSelectedBoardPostId] = useState<number | null>(null);
   const [roleDrawerOpen, setRoleDrawerOpen] = useState(false);
-  const [activeCompactPane, setActiveCompactPane] = useState<PaneId>("top");
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>("open");
+  const [activeCompactWindowId, setActiveCompactWindowId] = useState<string>("");
   const layoutSaveRef = useRef<string | null>(null);
-  const panelLookup = useMemo(() => new Map(panels.map((panel) => [panel.id, panel])), [panels]);
 
   useEffect(() => {
     hydrateFromBootstrap(bootstrap);
-    layoutSaveRef.current = JSON.stringify(bootstrap.layout);
+    layoutSaveRef.current = JSON.stringify(ensureComposerLayout(bootstrap.layout, bootstrap.panels));
   }, [bootstrap, hydrateFromBootstrap]);
 
   const presetMutation = useMutation({
     mutationFn: async (presetId: string) => api.getLayout(externalUserId, presetId),
     onSuccess: (nextLayout) => {
-      layoutSaveRef.current = JSON.stringify(nextLayout);
-      replaceLayout(nextLayout);
+      const normalized = ensureComposerLayout(nextLayout, panels.length ? panels : bootstrap.panels);
+      layoutSaveRef.current = JSON.stringify(normalized);
+      replaceLayout(normalized);
     },
   });
 
   const saveLayoutMutation = useMutation({
-    mutationFn: async (nextLayout: NonNullable<typeof layout>) => api.saveLayout(externalUserId, nextLayout.preset, nextLayout),
+    mutationFn: async (nextLayout: LayoutPayload) => api.saveLayout(externalUserId, nextLayout.preset, nextLayout),
     onSuccess: (savedLayout) => {
-      layoutSaveRef.current = JSON.stringify(savedLayout);
-      replaceLayout(savedLayout);
+      const normalized = ensureComposerLayout(savedLayout, panels.length ? panels : bootstrap.panels);
+      layoutSaveRef.current = JSON.stringify(normalized);
+      replaceLayout(normalized);
     },
   });
 
@@ -284,35 +290,77 @@ export function Shell({
   }, [layout, saveLayoutMutation]);
 
   useEffect(() => {
-    if (!compactLayout) {
-      setActiveCompactPane("top");
+    if (!layout?.composer) {
+      return;
     }
-  }, [compactLayout]);
+    const currentWindows = listComposerWindows(layout.composer.root);
+    if (!currentWindows.some((window) => window.id === activeCompactWindowId)) {
+      setActiveCompactWindowId(layout.composer.focus_window_id);
+    }
+  }, [activeCompactWindowId, layout]);
 
   if (!layout || !bootState) {
     return null;
   }
 
-  const focusPane = (pane: PaneId, panelId: string) => {
-    setPanePanel(pane, panelId);
-    if (compactLayout) {
-      setActiveCompactPane(pane);
+  const currentLayout = ensureComposerLayout(layout, panels);
+  const composer = currentLayout.composer!;
+  const activeRoleLabel = roleModeQuery.data?.active_role_label || bootState.workspace.active_role_label;
+  const maxRoleLabel = roleModeQuery.data?.max_role_label || bootState.workspace.max_role_label;
+  const canSwitchRole = roleModeQuery.data?.can_switch_role || bootState.workspace.can_switch_role;
+
+  const commitLayout = (nextLayout: LayoutPayload) => {
+    replaceLayout(nextLayout);
+    if (nextLayout.composer?.focus_window_id) {
+      setActiveCompactWindowId(nextLayout.composer.focus_window_id);
     }
   };
 
+  const openPanel = (panelId: string, mode: "focus-or-add" | "replace" = "focus-or-add") => {
+    commitLayout(
+      openPanelInComposer(currentLayout, panels, {
+        panelId,
+        targetWindowId: composer.focus_window_id,
+        axis: compactLayout ? "vertical" : splitDirection,
+        mode,
+      }),
+    );
+  };
+
+  const focusWindow = (windowId: string) => {
+    commitLayout(focusComposerWindow(currentLayout, panels, windowId));
+  };
+
+  const changeWindowPanel = (windowId: string, panelId: string) => {
+    commitLayout(replaceWindowPanel(currentLayout, panels, windowId, panelId));
+  };
+
+  const closeWindow = (windowId: string) => {
+    commitLayout(closeComposerWindow(currentLayout, panels, windowId));
+  };
+
+  const toggleSpotlight = (windowId: string) => {
+    commitLayout(toggleSpotlightWindow(currentLayout, panels, windowId));
+  };
+
+  const resizeSplit = (splitId: string, sizes: number[]) => {
+    replaceLayout(resizeComposerSplit(currentLayout, panels, splitId, sizes));
+  };
+
+  const focusPanel = (_pane: PaneId, panelId: string) => {
+    openPanel(panelId);
+  };
+
   const openEstimate = (estimateId: number) => {
+    openPanel("estimates-list");
     setSelectedEstimateId(estimateId);
     setSelectedOrderId(null);
   };
 
   const openOrder = (orderId: number) => {
+    openPanel("orders-list");
     setSelectedEstimateId(null);
     setSelectedOrderId(orderId);
-  };
-
-  const focusPanelByCallback = (pane: PaneId, panelId: string) => {
-    focusPane(pane, panelId);
-    setCommandOpen(false);
   };
 
   const handleWorkflowTarget = (callback?: string | null) => {
@@ -329,9 +377,10 @@ export function Shell({
       case "est_to_order":
       case "est_approve":
       case "est_reject":
-        focusPanelByCallback("top", "estimates-list");
         if (parsed.id !== null) {
           openEstimate(parsed.id);
+        } else {
+          openPanel("estimates-list");
         }
         return;
       case "order_view":
@@ -341,22 +390,23 @@ export function Shell({
       case "order_complete":
       case "order_pay":
       case "order_cancel":
-        focusPanelByCallback("top", "orders-list");
         if (parsed.id !== null) {
           openOrder(parsed.id);
+        } else {
+          openPanel("orders-list");
         }
         return;
       case "disc_detail":
       case "approvals":
-        focusPanelByCallback("top", "approvals-queue");
+        openPanel("approvals-queue");
         return;
       case "notif_open":
-        focusPanelByCallback("top", "notifications-list");
+        openPanel("notifications-list");
         return;
       case "profile":
       case "profile_edit":
       case "profile_requisites":
-        focusPanelByCallback("bottom", "profile-card");
+        openPanel("profile-card");
         return;
       case "profile_role_mode":
         setRoleDrawerOpen(true);
@@ -364,13 +414,13 @@ export function Shell({
       case "catalog":
       case "search":
       case "popular":
-        focusPanelByCallback("top", "catalog-browser");
+        openPanel("catalog-browser");
         return;
       case "my_estimates":
-        focusPanelByCallback("top", "estimates-list");
+        openPanel("estimates-list");
         return;
       case "my_orders":
-        focusPanelByCallback("top", "orders-list");
+        openPanel("orders-list");
         return;
       case "my_branch":
       case "br_view":
@@ -388,14 +438,14 @@ export function Shell({
       case "own_discounts":
       case "own_settings":
       case "adm_audit":
-        focusPanelByCallback("top", "control-center");
+        openPanel("control-center");
         return;
       default:
-        focusPanelByCallback("top", "workspace-overview");
+        openPanel("workspace-overview");
     }
   };
 
-  const renderPanel = (panelId: string) => {
+  const renderPanel = (panelId: string): ReactNode => {
     switch (panelId) {
       case "board-feed":
         return <BoardPanel externalUserId={externalUserId} bootstrap={bootState} onOpenResponses={setSelectedBoardPostId} />;
@@ -405,11 +455,11 @@ export function Shell({
             externalUserId={externalUserId}
             bootstrap={bootState}
             onOpenMaster={setSelectedMasterId}
-            onOpenProfile={() => focusPane("bottom", "profile-card")}
+            onOpenProfile={() => openPanel("profile-card")}
           />
         );
       case "workspace-overview":
-        return <WorkspacePanel bootstrap={bootState} onFocusPanel={focusPane} onOpenWorkflow={handleWorkflowTarget} />;
+        return <WorkspacePanel bootstrap={bootState} onFocusPanel={focusPanel} onOpenWorkflow={handleWorkflowTarget} />;
       case "catalog-browser":
         return <CatalogPanel externalUserId={externalUserId} canCreateEstimate={bootState.capabilities.can_create_estimate} onOpenEstimate={openEstimate} />;
       case "estimates-list":
@@ -431,24 +481,17 @@ export function Shell({
     }
   };
 
-  const topMeta = panelLookup.get(layout.panes.top) ?? panels[0];
-  const bottomMeta = panelLookup.get(layout.panes.bottom) ?? panels[0];
-  const activeRoleLabel = roleModeQuery.data?.active_role_label || bootState.workspace.active_role_label;
-  const maxRoleLabel = roleModeQuery.data?.max_role_label || bootState.workspace.max_role_label;
-  const canSwitchRole = roleModeQuery.data?.can_switch_role || bootState.workspace.can_switch_role;
-  const activePane = activeCompactPane === "bottom" ? "bottom" : "top";
-  const activeMeta = activePane === "top" ? topMeta : bottomMeta;
-  const activePanelId = activePane === "top" ? layout.panes.top : layout.panes.bottom;
-
   const handlePresetSelect = (presetId: string) => {
-    if (compactLayout) {
-      setActiveCompactPane("top");
-    }
     void presetMutation.mutateAsync(presetId);
   };
 
+  const openPalette = (mode: PaletteMode) => {
+    setPaletteMode(mode);
+    setCommandOpen(true);
+  };
+
   const handleOpenProfile = () => {
-    focusPane("bottom", "profile-card");
+    openPanel("profile-card");
   };
 
   return (
@@ -465,90 +508,84 @@ export function Shell({
         compact={compactLayout}
         onOpenRoleMode={() => setRoleDrawerOpen(true)}
         onSelectPreset={handlePresetSelect}
-        onOpenModules={() => setCommandOpen(true)}
+        onOpenModules={() => openPalette("open")}
         onOpenProfile={handleOpenProfile}
       />
 
-      {compactLayout ? (
-        <main className="workspace-frame compact-workspace" data-testid="workspace-frame">
-          <MobilePaneSwitcher activePane={activePane} topMeta={topMeta} bottomMeta={bottomMeta} onSelect={setActiveCompactPane} />
-          <PaneSurface
-            paneId={activePane}
-            panelId={activePanelId}
-            title={activeMeta?.title || "Панель"}
-            icon={activeMeta?.icon || "layers"}
-            direction={splitDirection}
-            compact
-            panels={panels}
-            onChange={focusPane}
-          >
-            {renderPanel(activePanelId)}
-          </PaneSurface>
-        </main>
-      ) : (
-        <main className="workspace-frame" data-testid="workspace-frame">
-          <Group
-            orientation={splitDirection}
-            onLayout={(sizes) => {
-              if (sizes[0]) {
-                setRatio(Number(sizes[0].toFixed(1)));
-              }
-            }}
-          >
-            <Panel defaultSize={layout.ratio} minSize={splitDirection === "horizontal" ? 32 : 34}>
-              <PaneSurface
-                paneId="top"
-                panelId={layout.panes.top}
-                title={topMeta?.title || "Панель"}
-                icon={topMeta?.icon || "layers"}
-                direction={splitDirection}
-                panels={panels}
-                onChange={focusPane}
-              >
-                {renderPanel(layout.panes.top)}
-              </PaneSurface>
-            </Panel>
-            <Separator className="resize-handle">
-              <div className="handle-core" />
-            </Separator>
-            <Panel defaultSize={100 - layout.ratio} minSize={splitDirection === "horizontal" ? 30 : 28}>
-              <PaneSurface
-                paneId="bottom"
-                panelId={layout.panes.bottom}
-                title={bottomMeta?.title || "Панель"}
-                icon={bottomMeta?.icon || "users"}
-                direction={splitDirection}
-                panels={panels}
-                onChange={focusPane}
-              >
-                {renderPanel(layout.panes.bottom)}
-              </PaneSurface>
-            </Panel>
-          </Group>
-        </main>
-      )}
+      <main className={`workspace-frame composer-frame ${compactLayout ? "compact-workspace" : ""}`} data-testid="workspace-frame">
+        <section className="workspace-intent glass-card">
+          <div>
+            <strong>Живой composer</strong>
+            <p>Обычный тап переключает режим, удержание добавляет новое окно рядом, двойной тап по заголовку окна включает фокус.</p>
+          </div>
+          <button className="btn" type="button" onClick={() => openPalette("open")}>
+            Добавить модуль
+          </button>
+        </section>
+
+        <WindowComposer
+          layout={currentLayout}
+          panels={panels}
+          compact={compactLayout}
+          activeCompactWindowId={activeCompactWindowId || composer.focus_window_id}
+          onSelectCompactWindow={setActiveCompactWindowId}
+          onFocusWindow={focusWindow}
+          onChangeWindowPanel={changeWindowPanel}
+          onCloseWindow={closeWindow}
+          onToggleSpotlight={toggleSpotlight}
+          onResizeSplit={resizeSplit}
+          renderPanel={renderPanel}
+        />
+      </main>
 
       <footer className="dock" data-testid="workspace-dock">
-        <button data-testid="dock-market" className={`dock-btn ${layout.preset === "market" ? "strong" : ""}`} onClick={() => handlePresetSelect("market")}>
-          Рынок
-        </button>
-        <button data-testid="dock-workbench" className={`dock-btn ${layout.preset === "workbench" ? "strong" : ""}`} onClick={() => handlePresetSelect("workbench")}>
-          Работа
-        </button>
+        <DockActionButton
+          testId="dock-market"
+          label="Рынок"
+          strong={currentLayout.preset === "market"}
+          onTap={() => handlePresetSelect("market")}
+          onHold={() => openPanel("board-feed")}
+        />
+        <DockActionButton
+          testId="dock-workbench"
+          label="Работа"
+          strong={currentLayout.preset === "workbench"}
+          onTap={() => handlePresetSelect("workbench")}
+          onHold={() => openPanel("workspace-overview")}
+        />
         {presets.some((item) => item.id === "control") ? (
-          <button data-testid="dock-control" className={`dock-btn ${layout.preset === "control" ? "strong" : ""}`} onClick={() => handlePresetSelect("control")}>
-            Операции
-          </button>
+          <DockActionButton
+            testId="dock-control"
+            label="Операции"
+            strong={currentLayout.preset === "control"}
+            onTap={() => handlePresetSelect("control")}
+            onHold={() => openPanel("control-center")}
+          />
         ) : null}
-        <button data-testid="dock-profile" className="dock-btn" onClick={handleOpenProfile}>
-          Профиль
-        </button>
-        <button data-testid="dock-modules" className="dock-btn strong" onClick={() => setCommandOpen(true)}>
-          {compactLayout ? "Ещё" : "Все модули"}
-        </button>
+        <DockActionButton
+          testId="dock-profile"
+          label="Профиль"
+          onTap={handleOpenProfile}
+          onHold={() => setRoleDrawerOpen(true)}
+        />
+        <DockActionButton
+          testId="dock-modules"
+          label={compactLayout ? "Ещё" : "Модули"}
+          strong
+          onTap={() => openPalette("open")}
+          onHold={() => openPalette("replace")}
+        />
       </footer>
 
-      <CommandPalette open={commandOpen} panels={panels} onClose={() => setCommandOpen(false)} onSelect={focusPane} />
+      <CommandPalette
+        open={commandOpen}
+        panels={panels}
+        compact={compactLayout}
+        mode={paletteMode}
+        onModeChange={setPaletteMode}
+        onClose={() => setCommandOpen(false)}
+        onSelect={(panelId, mode) => openPanel(panelId, mode === "replace" ? "replace" : "focus-or-add")}
+      />
       <BoardResponsesDrawer externalUserId={externalUserId} postId={selectedBoardPostId} onClose={() => setSelectedBoardPostId(null)} />
       <MasterDrawer externalUserId={externalUserId} selectedMasterId={selectedMasterId} onClose={() => setSelectedMasterId(null)} />
       <RoleModeDrawer
@@ -559,7 +596,13 @@ export function Shell({
         isPending={roleModeMutation.isPending}
         errorText={roleModeMutation.error ? errorMessage(roleModeMutation.error, "Не удалось переключить роль") : null}
       />
-      <EstimateDrawer externalUserId={externalUserId} estimateId={selectedEstimateId} onClose={() => setSelectedEstimateId(null)} onFocusPanel={focusPane} onOpenOrder={openOrder} />
+      <EstimateDrawer
+        externalUserId={externalUserId}
+        estimateId={selectedEstimateId}
+        onClose={() => setSelectedEstimateId(null)}
+        onFocusPanel={focusPanel}
+        onOpenOrder={openOrder}
+      />
       <OrderDrawer externalUserId={externalUserId} orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />
     </div>
   );
