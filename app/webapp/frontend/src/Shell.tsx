@@ -51,7 +51,7 @@ function CommandPalette({
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="palette" onClick={(event) => event.stopPropagation()}>
+      <div className="palette" data-testid="command-palette" onClick={(event) => event.stopPropagation()}>
         <div className="palette-head">
           <div>
             <h3>Рабочие модули</h3>
@@ -126,7 +126,7 @@ function PaneSurface({
   children: ReactNode;
 }) {
   return (
-    <section className="pane-surface">
+    <section className="pane-surface" data-testid={`pane-surface-${paneId}`} data-panel-id={panelId}>
       <header className="pane-head">
         <div className="pane-title">
           <span className="glyph-shell">
@@ -389,7 +389,7 @@ export function Shell({
   const canSwitchRole = roleModeQuery.data?.can_switch_role || bootState.workspace.can_switch_role;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-testid="superapp-shell">
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
 
@@ -405,9 +405,9 @@ export function Shell({
         onOpenProfile={() => setPanePanel("bottom", "profile-card")}
       />
 
-      <main className="workspace-frame">
+      <main className="workspace-frame" data-testid="workspace-frame">
         <Group
-          direction={splitDirection}
+          orientation={splitDirection}
           onLayout={(sizes) => {
             if (sizes[0]) {
               setRatio(Number(sizes[0].toFixed(1)));
@@ -446,22 +446,22 @@ export function Shell({
         </Group>
       </main>
 
-      <footer className="dock">
-        <button className={`dock-btn ${layout.preset === "market" ? "strong" : ""}`} onClick={() => void presetMutation.mutateAsync("market")}>
+      <footer className="dock" data-testid="workspace-dock">
+        <button data-testid="dock-market" className={`dock-btn ${layout.preset === "market" ? "strong" : ""}`} onClick={() => void presetMutation.mutateAsync("market")}>
           Рынок
         </button>
-        <button className={`dock-btn ${layout.preset === "workbench" ? "strong" : ""}`} onClick={() => void presetMutation.mutateAsync("workbench")}>
+        <button data-testid="dock-workbench" className={`dock-btn ${layout.preset === "workbench" ? "strong" : ""}`} onClick={() => void presetMutation.mutateAsync("workbench")}>
           Работа
         </button>
         {presets.some((item) => item.id === "control") ? (
-          <button className={`dock-btn ${layout.preset === "control" ? "strong" : ""}`} onClick={() => void presetMutation.mutateAsync("control")}>
+          <button data-testid="dock-control" className={`dock-btn ${layout.preset === "control" ? "strong" : ""}`} onClick={() => void presetMutation.mutateAsync("control")}>
             Операции
           </button>
         ) : null}
-        <button className="dock-btn" onClick={() => setPanePanel("bottom", "profile-card")}>
+        <button data-testid="dock-profile" className="dock-btn" onClick={() => setPanePanel("bottom", "profile-card")}>
           Профиль
         </button>
-        <button className="dock-btn strong" onClick={() => setCommandOpen(true)}>
+        <button data-testid="dock-modules" className="dock-btn strong" onClick={() => setCommandOpen(true)}>
           Все модули
         </button>
       </footer>
@@ -482,4 +482,3 @@ export function Shell({
     </div>
   );
 }
-

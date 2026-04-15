@@ -49,6 +49,12 @@ coverage.xml
 
 # pytest
 .pytest_cache/
+.playwright/
+playwright-report/
+test-results/
+app/webapp/frontend/playwright-report/
+app/webapp/frontend/test-results/
+app/webapp/frontend/.playwright/
 
 # mypy
 .mypy_cache/

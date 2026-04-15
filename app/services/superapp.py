@@ -96,8 +96,8 @@ PANEL_DEFINITIONS = (
     },
     {
         "id": "control-center",
-        "title": "РљРѕРЅС‚СѓСЂ",
-        "subtitle": "РљРѕРјР°РЅРґР°, РёРЅРІР°Р№С‚С‹, РјРѕРґРµСЂР°С†РёСЏ Рё С„Р»Р°РіРё",
+        "title": "Операции",
+        "subtitle": "Команда, инвайты, модерация и флаги",
         "group": "control",
         "icon": "spark",
         "visibility": "ops",

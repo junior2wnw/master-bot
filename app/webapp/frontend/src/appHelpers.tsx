@@ -367,7 +367,7 @@ export function SpotlightHero({
   ];
 
   return (
-    <header className="hero-shell">
+    <header className="hero-shell" data-testid="spotlight-hero">
       <div className="hero-main glass-card">
         <div className="hero-brand">
           <div className="brand-mark">4-2</div>
@@ -388,21 +388,21 @@ export function SpotlightHero({
           </p>
         </div>
         <div className="hero-actions">
-          <button className="btn btn-primary" onClick={() => onSelectPreset("market")}>
+          <button className="btn btn-primary" data-testid="hero-preset-market" onClick={() => onSelectPreset("market")}>
             Рынок
           </button>
-          <button className="btn" onClick={() => onSelectPreset("workbench")}>
+          <button className="btn" data-testid="hero-preset-workbench" onClick={() => onSelectPreset("workbench")}>
             Работа
           </button>
-          <button className="btn" onClick={onOpenProfile}>
+          <button className="btn" data-testid="hero-open-profile" onClick={onOpenProfile}>
             Профиль
           </button>
           {canSwitchRole ? (
-            <button className="btn" onClick={onOpenRoleMode}>
+            <button className="btn" data-testid="hero-open-role-mode" onClick={onOpenRoleMode}>
               Роль
             </button>
           ) : null}
-          <button className="btn" onClick={onOpenModules}>
+          <button className="btn" data-testid="hero-open-modules" onClick={onOpenModules}>
             Модули
           </button>
         </div>
@@ -425,4 +425,3 @@ export function paneLabel(paneId: PaneId, direction: "horizontal" | "vertical"):
   }
   return paneId === "top" ? "Верхняя половина" : "Нижняя половина";
 }
-

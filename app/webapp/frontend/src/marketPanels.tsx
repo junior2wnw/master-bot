@@ -129,7 +129,7 @@ export function BoardPanel({
   const totalResponses = ownVisiblePosts.reduce((sum, post) => sum + post.response_count, 0);
 
   return (
-    <div className="panel-stack market-pane">
+    <div className="panel-stack market-pane" data-testid="board-panel">
       <section className="market-overview section-card">
         <div className="market-overview-copy">
           <span className="eyebrow">Лента спроса</span>
@@ -288,10 +288,10 @@ export function BoardPanel({
         </div>
       </SectionCard>
 
-      <div className="card-list">
+      <div className="card-list" data-testid="board-post-list">
         {posts.length ? (
           posts.map((post: JobPost) => (
-            <article key={post.id} className="glass-card board-card market-card">
+            <article key={post.id} className="glass-card board-card market-card" data-testid="board-post-card">
               <div className="card-topline">
                 <span className={`pill ${toneClass(post.urgency)}`}>{statusLabel(post.urgency)}</span>
                 <span className="tag soft-tag">{post.is_owner ? "Моя заявка" : post.author.name}</span>
@@ -410,7 +410,7 @@ export function NetworkPanel({
   });
 
   return (
-    <div className="panel-stack market-pane">
+    <div className="panel-stack market-pane" data-testid="network-panel">
       <section className="market-overview section-card">
         <div className="market-overview-copy">
           <span className="eyebrow">Сеть мастеров</span>
@@ -456,10 +456,10 @@ export function NetworkPanel({
         </div>
       </SectionCard>
 
-      <div className="card-list">
+      <div className="card-list" data-testid="network-master-list">
         {mastersQuery.data?.items.length ? (
           mastersQuery.data.items.map((master: MasterCard) => (
-            <article key={master.external_user_id} className="glass-card master-card market-card">
+            <article key={master.external_user_id} className="glass-card master-card market-card" data-testid="network-master-card">
               <div className="master-accent" style={{ background: master.accent_color }} />
               <div className="card-topline">
                 <span className={`pill ${toneClass(master.availability_status)}`}>
@@ -507,4 +507,3 @@ export function NetworkPanel({
     </div>
   );
 }
-

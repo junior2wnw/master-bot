@@ -339,7 +339,7 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
 
   if (bootstrapQuery.isPending) {
     return (
-      <div className="empty-state">
+      <div className="empty-state" data-testid="control-center-loading">
         <strong>Собираем контур управления…</strong>
         <p>Подтягиваем команду, ветки и operational-сигналы.</p>
       </div>
@@ -348,15 +348,15 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
 
   if (bootstrapQuery.error || !bootstrap) {
     return (
-      <div className="empty-state">
-        <strong>Control Center пока недоступен</strong>
+      <div className="empty-state" data-testid="control-center-error">
+        <strong>Операционный центр пока недоступен</strong>
         <p>{errorText(bootstrapQuery.error, "Не удалось загрузить operational-данные.")}</p>
       </div>
     );
   }
 
   const teamSection = (
-    <div className="panel-stack">
+    <div className="panel-stack" data-testid="control-center-panel">
       <section className="section-card">
         <header className="section-head">
           <div>
@@ -1221,7 +1221,7 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
       <section className="section-card">
         <header className="section-head">
           <div>
-            <h3>Control Center</h3>
+            <h3>Операционный центр</h3>
             <p>Один тихий operational-слой вместо россыпи служебных бот-сценариев.</p>
           </div>
         </header>

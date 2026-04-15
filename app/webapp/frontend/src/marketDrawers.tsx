@@ -39,7 +39,7 @@ export function BoardResponsesDrawer({
 
   return (
     <div className="overlay" onClick={onClose}>
-      <aside className="drawer" onClick={(event) => event.stopPropagation()}>
+      <aside className="drawer" data-testid="board-responses-drawer" onClick={(event) => event.stopPropagation()}>
         <div className="palette-head">
           <div>
             <h3>{payload?.post.title || "Отклики на заявку"}</h3>
@@ -100,7 +100,7 @@ export function MasterDrawer({
 
   return (
     <div className="overlay" onClick={onClose}>
-      <aside className="drawer" onClick={(event) => event.stopPropagation()}>
+      <aside className="drawer" data-testid="master-drawer" onClick={(event) => event.stopPropagation()}>
         <div className="palette-head">
           <div>
             <h3>{masterQuery.data?.name || "Мастер"}</h3>
@@ -207,7 +207,7 @@ export function RoleModeDrawer({
 
   return (
     <div className="overlay" onClick={onClose}>
-      <aside className="drawer" onClick={(event) => event.stopPropagation()}>
+      <aside className="drawer" data-testid="role-mode-drawer" onClick={(event) => event.stopPropagation()}>
         <div className="palette-head">
           <div>
             <h3>Роль и режим</h3>
@@ -248,4 +248,3 @@ export function RoleModeDrawer({
     </div>
   );
 }
-

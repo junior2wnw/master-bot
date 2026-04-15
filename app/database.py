@@ -4,8 +4,10 @@ from collections.abc import AsyncGenerator
 from datetime import datetime
 
 from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.pool import StaticPool
 
 from app.config import get_settings
 
@@ -40,13 +42,25 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_async_engine(
-            settings.database_url,
-            echo=settings.is_dev,
-            pool_size=20,
-            max_overflow=10,
-            pool_pre_ping=True,
-        )
+        engine_options = {"echo": settings.is_dev}
+        database_url = make_url(settings.database_url)
+        backend = database_url.get_backend_name()
+        if backend == "sqlite":
+            connect_args = {}
+            if database_url.drivername.startswith("sqlite+aiosqlite"):
+                connect_args["check_same_thread"] = False
+            engine_options["connect_args"] = connect_args
+            if database_url.database in (None, "", ":memory:"):
+                engine_options["poolclass"] = StaticPool
+        else:
+            engine_options.update(
+                {
+                    "pool_size": 20,
+                    "max_overflow": 10,
+                    "pool_pre_ping": True,
+                }
+            )
+        _engine = create_async_engine(settings.database_url, **engine_options)
     return _engine
 
 

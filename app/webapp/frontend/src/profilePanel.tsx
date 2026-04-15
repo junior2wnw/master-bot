@@ -96,7 +96,7 @@ export function ProfilePanel({
   });
 
   return (
-    <div className="panel-stack">
+    <div className="panel-stack" data-testid="profile-panel">
       <SectionCard title="Аккаунт" subtitle="Только то, что нужно продукту для работы и доверия.">
         <div className="stack-form">
           <input
@@ -230,4 +230,3 @@ export function ProfilePanel({
     </div>
   );
 }
-

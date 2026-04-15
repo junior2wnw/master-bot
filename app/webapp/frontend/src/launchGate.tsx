@@ -2,7 +2,7 @@ import { MAX_BOT_STARTAPP_URL } from "./appHelpers";
 
 export function LaunchGate() {
   return (
-    <div className="screen-center">
+    <div className="screen-center" data-testid="launch-gate">
       <div className="error-card launch-gate">
         <strong>Откройте ПриДел внутри MAX</strong>
         <p>
@@ -21,4 +21,3 @@ export function LaunchGate() {
     </div>
   );
 }
-
