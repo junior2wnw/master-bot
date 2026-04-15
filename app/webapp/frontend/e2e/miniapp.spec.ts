@@ -75,24 +75,27 @@ test("loads the authenticated desktop shell and opens operations", async ({ page
 
   await expect(page.getByTestId("superapp-shell")).toBeVisible();
   await expect(page.getByTestId("spotlight-hero")).toBeVisible();
-  await expect(page.getByTestId("board-panel")).toBeVisible();
   await expect(page.getByTestId("workspace-dock")).toBeVisible();
-
-  const bottomPane = page.getByTestId("pane-surface-bottom");
-  await bottomPane.locator(".pane-head select").selectOption("network-directory");
-  await expect(page.getByTestId("network-panel")).toBeVisible();
+  await page.getByTestId("dock-market").click();
 
   const geometry = await readPaneGeometry(page);
-  expect(geometry.top).not.toBeNull();
-  expect(geometry.bottom).not.toBeNull();
   expect(geometry.dock).not.toBeNull();
 
   if (geometry.viewport.width >= 1040) {
+    await expect(page.getByTestId("board-panel")).toBeVisible();
+    const bottomPane = page.getByTestId("pane-surface-bottom");
+    await bottomPane.locator(".pane-head select").selectOption("network-directory");
+    await expect(page.getByTestId("network-panel")).toBeVisible();
+    expect(geometry.top).not.toBeNull();
+    expect(geometry.bottom).not.toBeNull();
     expect(geometry.groupFlow).toContain("row");
     expect(geometry.bottom!.x).toBeGreaterThan(geometry.top!.x + 24);
   } else {
-    expect(geometry.groupFlow).toContain("column");
-    expect(Math.abs(geometry.bottom!.x - geometry.top!.x)).toBeLessThan(24);
+    await expect(page.getByTestId("mobile-pane-switcher")).toBeVisible();
+    await expect(page.getByTestId("pane-surface-top")).toBeVisible();
+    await expect(page.getByTestId("board-panel")).toBeVisible();
+    await page.getByTestId("mobile-pane-tab-bottom").click();
+    await expect(page.getByTestId("pane-surface-bottom")).toBeVisible();
     expect(geometry.dock!.y).toBeLessThanOrEqual(geometry.viewport.height);
   }
 
@@ -125,20 +128,21 @@ test("keeps the mobile shell readable and dock-first", async ({ page }, testInfo
   const runtimeIssues = await attachRuntimeWatchers(page);
 
   await page.goto(signedEntryPath(), { waitUntil: "domcontentloaded" });
+  await page.getByTestId("dock-market").click();
 
   await expect(page.getByTestId("superapp-shell")).toBeVisible();
   await expect(page.getByTestId("spotlight-hero")).toBeVisible();
+  await expect(page.getByTestId("mobile-pane-switcher")).toBeVisible();
   await expect(page.getByTestId("pane-surface-top")).toBeVisible();
-  await expect(page.getByTestId("pane-surface-bottom")).toBeVisible();
+  await expect(page.getByTestId("board-panel")).toBeVisible();
   await expect(page.getByTestId("workspace-dock")).toBeVisible();
 
   const geometry = await readPaneGeometry(page);
   expect(geometry.viewport.width).toBeLessThan(1040);
   expect(geometry.top).not.toBeNull();
-  expect(geometry.bottom).not.toBeNull();
   expect(geometry.dock).not.toBeNull();
-  expect(geometry.groupFlow).toContain("column");
-  expect(Math.abs(geometry.bottom!.x - geometry.top!.x)).toBeLessThan(24);
+  await page.getByTestId("mobile-pane-tab-bottom").click();
+  await expect(page.getByTestId("pane-surface-bottom")).toBeVisible();
   expect(geometry.dock!.y).toBeLessThanOrEqual(geometry.viewport.height);
 
   await page.screenshot({

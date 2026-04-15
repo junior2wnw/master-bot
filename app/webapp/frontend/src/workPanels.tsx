@@ -2,7 +2,7 @@ import { useDeferredValue, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./api";
-import { EmptyState, SectionCard, errorMessage, formatAgo, money, statusLabel, toneClass } from "./appHelpers";
+import { EmptyState, SectionCard, errorMessage, formatAgo, money, statusLabel, toneClass, useCompactLayout } from "./appHelpers";
 import type { BootstrapResponse, EstimateSummary, NotificationItem, OrderSummary, PaneId } from "./types";
 
 export function WorkspacePanel({
@@ -14,6 +14,7 @@ export function WorkspacePanel({
   onFocusPanel: (pane: PaneId, panelId: string) => void;
   onOpenWorkflow: (callback?: string | null) => void;
 }) {
+  const isCompact = useCompactLayout();
   const metrics = [
     { label: "Сметы", value: bootstrap.workspace.active_estimates },
     { label: "Заказы", value: bootstrap.workspace.active_orders },
@@ -28,20 +29,21 @@ export function WorkspacePanel({
   }
 
   return (
-    <div className="panel-stack workspace-pane">
-      <section className="market-overview section-card">
+    <div className={`panel-stack workspace-pane ${isCompact ? "compact-market-pane" : ""}`}>
+      <section className={`${isCompact ? "section-card compact-hero-card" : "market-overview section-card"}`}>
         <div className="market-overview-copy">
           <span className="eyebrow">Рабочий стол</span>
-          <h3>Только те действия, которые реально двигают работу вперёд</h3>
+          <h3>{isCompact ? "Главное по делу без длинного меню" : "Только те действия, которые реально двигают работу вперёд"}</h3>
           <p>
-            Здесь нет перегруженного меню. Есть понятная сводка, короткий список следующего шага и
-            быстрые переходы туда, где можно принять решение.
+            {isCompact
+              ? "Сначала видно, что требует внимания прямо сейчас, а затем уже детали."
+              : "Здесь нет перегруженного меню. Есть понятная сводка, короткий список следующего шага и быстрые переходы туда, где можно принять решение."}
           </p>
         </div>
       </section>
 
-      <SectionCard title="Сводка на сейчас" subtitle="Ситуация по делу, без лишних таблиц.">
-        <div className="metric-grid">
+      <SectionCard title={isCompact ? "На сейчас" : "Сводка на сейчас"} subtitle={isCompact ? "Только живые числа, без лишних объяснений." : "Ситуация по делу, без лишних таблиц."}>
+        <div className={`metric-grid ${isCompact ? "metric-grid-compact" : ""}`}>
           {metrics.map((metric) => (
             <div key={metric.label} className="metric-card">
               <span>{metric.label}</span>
@@ -52,7 +54,7 @@ export function WorkspacePanel({
       </SectionCard>
 
       {bootstrap.workspace.action_items.length ? (
-        <SectionCard title="Следующий лучший шаг" subtitle="Нажимать стоит только туда, где есть смысл действовать.">
+        <SectionCard title={isCompact ? "Что делать дальше" : "Следующий лучший шаг"} subtitle="Нажимать стоит только туда, где есть смысл действовать.">
           <div className="task-list">
             {bootstrap.workspace.action_items.map((task) => (
               <button key={task.callback} className="task-card" onClick={() => onOpenWorkflow(task.callback)}>
@@ -65,7 +67,7 @@ export function WorkspacePanel({
       ) : null}
 
       {bootstrap.workspace.onboarding.length ? (
-        <SectionCard title="Что усилит доверие" subtitle="Пара небольших шагов, которые повышают конверсию и качество сделок.">
+        <SectionCard title={isCompact ? "Что усилит доверие" : "Что усилит доверие"} subtitle="Пара небольших шагов, которые повышают конверсию и качество сделок.">
           <div className="task-list">
             {bootstrap.workspace.onboarding.map((task) => (
               <button key={task.id} className="task-card" onClick={() => onFocusPanel("bottom", "profile-card")}>
@@ -77,8 +79,8 @@ export function WorkspacePanel({
         </SectionCard>
       ) : null}
 
-      <SectionCard title="Быстрые переходы" subtitle="Там, где люди чаще всего хотят оказаться за один тап.">
-        <div className="quick-grid">
+      <SectionCard title={isCompact ? "Куда перейти" : "Быстрые переходы"} subtitle="Там, где люди чаще всего хотят оказаться за один тап.">
+        <div className={`quick-grid ${isCompact ? "quick-grid-compact" : ""}`}>
           {[
             { label: "Каталог", pane: "top" as PaneId, panel: "catalog-browser" },
             { label: "Сметы", pane: "top" as PaneId, panel: "estimates-list" },
@@ -449,4 +451,3 @@ export function AnalyticsPanel({ externalUserId }: { externalUserId: number }) {
     </div>
   );
 }
-

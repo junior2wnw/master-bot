@@ -12,6 +12,7 @@ import type {
 
 export const MAX_BOT_STARTAPP_URL = "https://max.ru/id026303852801_bot?startapp";
 const DESKTOP_SPLIT_QUERY = "(min-width: 1040px)";
+const COMPACT_LAYOUT_QUERY = "(max-width: 720px)";
 
 export function money(value?: number | null): string {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value ?? 0);
@@ -160,6 +161,28 @@ export function useSplitDirection(): "horizontal" | "vertical" {
   }, []);
 
   return isDesktop ? "horizontal" : "vertical";
+}
+
+export function useCompactLayout(): boolean {
+  const [isCompact, setIsCompact] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+    const media = window.matchMedia(COMPACT_LAYOUT_QUERY);
+    const onChange = (event: MediaQueryListEvent) => setIsCompact(event.matches);
+    setIsCompact(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  return isCompact;
 }
 
 export function Glyph({ name }: { name: string }) {
@@ -344,6 +367,7 @@ export function SpotlightHero({
   activeRoleLabel,
   maxRoleLabel,
   canSwitchRole,
+  compact,
   onOpenRoleMode,
   onSelectPreset,
   onOpenModules,
@@ -354,67 +378,83 @@ export function SpotlightHero({
   activeRoleLabel: string;
   maxRoleLabel: string;
   canSwitchRole: boolean;
+  compact: boolean;
   onOpenRoleMode: () => void;
   onSelectPreset: (presetId: string) => void;
   onOpenModules: () => void;
   onOpenProfile: () => void;
 }) {
   const summaryCards = [
-    { label: "Заказы на рынке", value: bootstrap.board.total },
-    { label: "Мастеров в сети", value: bootstrap.network.total },
-    { label: "Активных заказов", value: bootstrap.workspace.active_orders },
-    { label: "Сигналов", value: bootstrap.notifications.unread },
+    { label: compact ? "Заявки" : "Заказы на рынке", value: bootstrap.board.total },
+    { label: compact ? "Мастера" : "Мастеров в сети", value: bootstrap.network.total },
+    { label: compact ? "Заказы" : "Активных заказов", value: bootstrap.workspace.active_orders },
+    { label: "Сигналы", value: bootstrap.notifications.unread },
   ];
+  const compactSummaryCards = compact ? summaryCards.filter((card) => card.value > 0).slice(0, 3) : summaryCards;
 
   return (
-    <header className="hero-shell" data-testid="spotlight-hero">
+    <header className={`hero-shell ${compact ? "hero-shell-compact" : ""}`} data-testid="spotlight-hero">
       <div className="hero-main glass-card">
         <div className="hero-brand">
           <div className="brand-mark">4-2</div>
           <div>
             <span className="eyebrow">4-2 • ПриДел</span>
             <h1>{auth.name}</h1>
-            <p className="hero-role">
-              {activeRoleLabel}
-              {maxRoleLabel && maxRoleLabel !== activeRoleLabel ? ` • потолок ${maxRoleLabel}` : ""}
-            </p>
+            <p className="hero-role">{compact ? activeRoleLabel : `${activeRoleLabel}${maxRoleLabel && maxRoleLabel !== activeRoleLabel ? ` • потолок ${maxRoleLabel}` : ""}`}</p>
           </div>
         </div>
         <div className="hero-copy">
-          <h2>Одна простая среда для спроса, мастеров и выполнения работ</h2>
+          <h2>{compact ? "Найти мастера и закрыть задачу без лишних экранов" : "Одна простая среда для спроса, мастеров и выполнения работ"}</h2>
           <p>
-            Слева и справа не хаос из экранов, а живой рынок: людям легче оставить заявку,
-            мастерам легче показать себя и быстрее взять работу.
+            {compact
+              ? "Рынок и работа разведены понятно: меньше поиска, меньше лишних нажатий."
+              : "Слева и справа не хаос из экранов, а живой рынок: людям легче оставить заявку, мастерам легче показать себя и быстрее взять работу."}
           </p>
         </div>
-        <div className="hero-actions">
+        <div className={`hero-actions ${compact ? "hero-actions-compact" : ""}`}>
           <button className="btn btn-primary" data-testid="hero-preset-market" onClick={() => onSelectPreset("market")}>
             Рынок
           </button>
           <button className="btn" data-testid="hero-preset-workbench" onClick={() => onSelectPreset("workbench")}>
             Работа
           </button>
-          <button className="btn" data-testid="hero-open-profile" onClick={onOpenProfile}>
-            Профиль
-          </button>
+          {!compact ? (
+            <button className="btn" data-testid="hero-open-profile" onClick={onOpenProfile}>
+              Профиль
+            </button>
+          ) : null}
           {canSwitchRole ? (
             <button className="btn" data-testid="hero-open-role-mode" onClick={onOpenRoleMode}>
               Роль
             </button>
           ) : null}
-          <button className="btn" data-testid="hero-open-modules" onClick={onOpenModules}>
-            Модули
-          </button>
+          {!compact ? (
+            <button className="btn" data-testid="hero-open-modules" onClick={onOpenModules}>
+              Модули
+            </button>
+          ) : null}
         </div>
-      </div>
-      <div className="hero-stats">
-        {summaryCards.map((card) => (
-          <div key={card.label} className="metric-card hero-metric">
-            <span>{card.label}</span>
-            <strong>{card.value}</strong>
+        {compact && compactSummaryCards.length ? (
+          <div className="hero-signal-strip">
+            {compactSummaryCards.map((card) => (
+              <div key={card.label} className="hero-stat-pill">
+                <strong>{card.value}</strong>
+                <span>{card.label}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        ) : null}
       </div>
+      {!compact ? (
+        <div className="hero-stats">
+          {summaryCards.map((card) => (
+            <div key={card.label} className="metric-card hero-metric">
+              <span>{card.label}</span>
+              <strong>{card.value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </header>
   );
 }
