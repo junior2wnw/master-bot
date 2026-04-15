@@ -67,7 +67,8 @@ test("builds a live desktop composer and supports focus mode", async ({ page }, 
   await expect(page.getByTestId("workspace-dock")).toBeVisible();
 
   await page.getByTestId("dock-workbench").click();
-  await expect(page.getByText("Живой composer")).toBeVisible();
+  await expect(page.locator(".workspace-intent")).toBeVisible();
+  await expect(page.locator(".workspace-intent-actions .btn").first()).toBeVisible();
 
   const pillsBefore = await countWindowPills(page);
   await holdButton(page, "dock-market");

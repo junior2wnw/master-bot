@@ -27,11 +27,23 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-COPY app/ ./app/
-COPY --from=frontend /dist/ ./app/webapp/dist/
+COPY README.md ./
+
+RUN python - <<'PY' > /tmp/requirements.txt
+import pathlib
+import tomllib
+
+project = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+dependencies = list(project.get("dependencies", []))
+dependencies.extend(project.get("optional-dependencies", {}).get("prod", []))
+print("\n".join(dependencies))
+PY
 
 RUN pip install --no-cache-dir --upgrade pip setuptools && \
-    pip install --no-cache-dir ".[prod]"
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY app/ ./app/
+COPY --from=frontend /dist/ ./app/webapp/dist/
 
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/
