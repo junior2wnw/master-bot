@@ -119,7 +119,11 @@ docker compose up -d --build --force-recreate app
 ```caddyfile
 4-2.xn--p1ai {
     encode gzip zstd
-    reverse_proxy pridel-app-1:8000
+    reverse_proxy app:8000
+}
+
+193.47.43.64.sslip.io {
+    redir https://4-2.xn--p1ai{uri} 308
 }
 ```
 
@@ -133,11 +137,14 @@ docker run -d \
   --network pridel_default \
   -p 80:80 \
   -p 443:443 \
-  -v /opt/pridel/Caddyfile:/etc/caddy/Caddyfile \
+  -v /opt/pridel/Caddyfile:/etc/caddy/Caddyfile:ro \
   -v pridel_caddy_data:/data \
   -v pridel_caddy_config:/config \
   caddy:2
 ```
+
+- Проверяйте, что `/opt/pridel/Caddyfile` синхронизирован с git-checkout, а upstream в нём равен `app:8000`.
+- Если после `docker compose up -d --build --force-recreate app` появился `502`, сначала пересоздайте `pridel-caddy` из текущего repo `Caddyfile`, а не ищите проблему в MAX Mini App.
 
 ## Проверки после деплоя
 
@@ -167,3 +174,12 @@ ssh pridel "cd /opt/pridel && docker compose logs --tail 100 app"
   Обычно причина в отсутствии публичного `https` URL или в пустом `WEBAPP_URL`.
 - Сертификат не выпускается:
   Проверьте, что `4-2.xn--p1ai` резолвится в `193.47.43.64`, и открыты порты `80` и `443`.
+
+## 2026-04-09 production notes
+
+- Verify exact Mini App entrypoint with `curl -I https://4-2.xn--p1ai/app`. This URL must return `200` and must not redirect to `http://.../app/`.
+- `https://4-2.xn--p1ai/app/` may still serve HTML, but for MAX the critical path is the exact `/app` URL.
+- In MAX bot/mini-app settings, save `https://4-2.xn--p1ai/app`, not `https://4-2.рф/app`.
+- If MAX shows a native technical error before the frontend renders, first check exact `/app`, then verify `WEBAPP_URL`, and only after that inspect signed launch data.
+- The shipped Mini App now supports launch payload extraction from URL fragments like `#WebAppData=...`, which matches MAX launch behavior.
+- Control Center in the Mini App now includes role management, branch assignment, branch creation, invites, staffing, and owner insights. Treat it as the primary operational surface instead of legacy Telegram callbacks.

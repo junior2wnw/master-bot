@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from urllib.parse import quote
 
 from app.api.v1 import _validate_init_data
 
@@ -114,6 +115,32 @@ class TestInitDataValidation:
         assert result is not None
         assert result["id"] == 67890
         assert result["first_name"] == "Max"
+
+    def test_valid_init_data_inside_max_hash_fragment(self):
+        """Validation should extract signed payload from MAX hash fragment."""
+        bot_token = "123456:ABC-DEF"
+        user = {"id": 24680, "first_name": "Hash", "username": "hashuser"}
+        init_data = self._make_init_data(user, bot_token)
+        fragment = f"#WebAppData={quote(init_data, safe='')}&WebAppVersion=8.0&WebAppPlatform=android"
+
+        result = _validate_init_data(fragment, bot_token)
+
+        assert result is not None
+        assert result["id"] == 24680
+        assert result["username"] == "hashuser"
+
+    def test_valid_init_data_inside_full_url_fragment(self):
+        """Validation should extract signed payload from a full Mini App URL."""
+        bot_token = "123456:ABC-DEF"
+        user = {"id": 13579, "first_name": "Url", "username": "urluser"}
+        init_data = self._make_init_data(user, bot_token)
+        full_url = f"https://4-2.xn--p1ai/app#WebAppData={quote(init_data, safe='')}&WebAppVersion=8.0"
+
+        result = _validate_init_data(full_url, bot_token)
+
+        assert result is not None
+        assert result["id"] == 13579
+        assert result["first_name"] == "Url"
 
 
 class TestMoneyFormatting:

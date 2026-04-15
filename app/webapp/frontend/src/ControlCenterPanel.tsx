@@ -12,7 +12,16 @@ import type {
   RoleOption,
 } from "./types";
 
-type ControlTab = "team" | "invites" | "moderation" | "flags";
+type ControlTab = "team" | "branches" | "invites" | "moderation" | "insights" | "flags";
+
+const ROLE_LABELS = new Map<string, string>([
+  ["client", "Клиент"],
+  ["master", "Мастер"],
+  ["senior_master", "Старший мастер"],
+  ["admin", "Администратор"],
+  ["product_owner", "Product Owner"],
+]);
+const BRANCH_ASSIGNABLE_ROLE_CODES = new Set(["master", "senior_master"]);
 
 const ROLE_FILTERS: RoleOption[] = [
   { code: "all", label: "Все роли" },
@@ -55,6 +64,12 @@ function formatAgo(value?: string | null): string {
   return `${diffDays} д назад`;
 }
 
+function money(value?: number | null): string {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 0,
+  }).format(value ?? 0);
+}
+
 function toneForInvite(invite: ControlInvite): string {
   if (invite.is_expired || invite.is_exhausted || !invite.is_active) {
     return "tone-muted";
@@ -83,16 +98,37 @@ function toneForFlag(flag: ControlFeatureFlag): string {
   return flag.enabled ? "tone-success" : "tone-muted";
 }
 
+function roleLabel(roleCode: string): string {
+  return ROLE_LABELS.get(roleCode) ?? roleCode;
+}
+
+function canBelongToBranch(user: ControlUser | null): boolean {
+  if (!user) {
+    return false;
+  }
+  return user.roles.some((roleCode) => BRANCH_ASSIGNABLE_ROLE_CODES.has(roleCode));
+}
+
 function controlTabs(bootstrap: ControlBootstrapResponse): Array<{ id: ControlTab; label: string }> {
   const tabs: Array<{ id: ControlTab; label: string }> = [];
   if (bootstrap.capabilities.can_view_team) {
     tabs.push({ id: "team", label: "Команда" });
   }
+  if (bootstrap.branch_overview.items.length) {
+    tabs.push({ id: "branches", label: "Ветки" });
+  }
   if (bootstrap.capabilities.can_create_invites || bootstrap.capabilities.can_moderate_invites) {
     tabs.push({ id: "invites", label: "Инвайты" });
   }
-  if (bootstrap.capabilities.can_moderate_invites || bootstrap.capabilities.can_initiate_staffing || bootstrap.capabilities.can_approve_staffing) {
+  if (
+    bootstrap.capabilities.can_moderate_invites ||
+    bootstrap.capabilities.can_initiate_staffing ||
+    bootstrap.capabilities.can_approve_staffing
+  ) {
     tabs.push({ id: "moderation", label: "Модерация" });
+  }
+  if (bootstrap.insights) {
+    tabs.push({ id: "insights", label: "Инсайты" });
   }
   if (bootstrap.capabilities.can_manage_flags) {
     tabs.push({ id: "flags", label: "Флаги" });
@@ -107,6 +143,7 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
   const [roleFilter, setRoleFilter] = useState("all");
   const [userStatus, setUserStatus] = useState("active");
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
   const [inviteRoleCode, setInviteRoleCode] = useState("");
   const [inviteBranchId, setInviteBranchId] = useState("");
   const [inviteUses, setInviteUses] = useState("1");
@@ -117,6 +154,8 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
   const [staffingReason, setStaffingReason] = useState("");
   const [staffingRoleCode, setStaffingRoleCode] = useState("master");
   const [staffingBranchId, setStaffingBranchId] = useState("");
+  const [selectedUserBranchId, setSelectedUserBranchId] = useState("");
+  const [newBranchName, setNewBranchName] = useState("");
 
   const deferredQuery = useDeferredValue(userQuery.trim());
 
@@ -184,6 +223,43 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
     },
   });
 
+  const updateUserRoleMutation = useMutation({
+    mutationFn: async (payload: { targetExternalUserId: number; roleCode: string; enabled: boolean }) =>
+      api.updateControlUserRole(externalUserId, payload.targetExternalUserId, {
+        role_code: payload.roleCode,
+        enabled: payload.enabled,
+      }),
+    onSuccess: async (updatedUser) => {
+      setSelectedUserId(updatedUser.external_user_id);
+      setSelectedUserBranchId(updatedUser.branches[0]?.id ? String(updatedUser.branches[0].id) : "");
+      await refreshControl();
+    },
+  });
+
+  const assignUserBranchMutation = useMutation({
+    mutationFn: async (payload: { targetExternalUserId: number; branchId: number | null }) =>
+      api.assignControlUserBranch(externalUserId, payload.targetExternalUserId, {
+        branch_id: payload.branchId,
+      }),
+    onSuccess: async (updatedUser) => {
+      setSelectedUserId(updatedUser.external_user_id);
+      setSelectedUserBranchId(updatedUser.branches[0]?.id ? String(updatedUser.branches[0].id) : "");
+      await refreshControl();
+    },
+  });
+
+  const createBranchMutation = useMutation({
+    mutationFn: async () =>
+      api.createControlBranch(externalUserId, {
+        name: newBranchName,
+      }),
+    onSuccess: async (branch) => {
+      setNewBranchName("");
+      setSelectedBranchId(branch.id);
+      await refreshControl();
+    },
+  });
+
   const moderateInviteMutation = useMutation({
     mutationFn: async (payload: { activationId: number; action: "approve" | "reject" }) =>
       api.moderateControlInviteActivation(externalUserId, payload.activationId, payload.action),
@@ -229,6 +305,16 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
     users.find((item) => item.external_user_id === selectedUserId) ??
     bootstrap?.users.items.find((item) => item.external_user_id === selectedUserId) ??
     null;
+  const selectedBranch =
+    bootstrap?.branch_overview.items.find((item) => item.id === selectedBranchId) ??
+    bootstrap?.branch_overview.items[0] ??
+    null;
+  const canManageSelectedUser = Boolean(
+    selectedUser &&
+      selectedUser.can_manage &&
+      (bootstrap?.capabilities.can_manage_users || bootstrap?.capabilities.can_manage_branches),
+  );
+  const selectedUserCanBelongToBranch = canBelongToBranch(selectedUser);
 
   useEffect(() => {
     if (!selectedUserId && users[0]) {
@@ -236,11 +322,26 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
     }
   }, [selectedUserId, users]);
 
+  useEffect(() => {
+    if (!selectedBranchId && bootstrap?.branch_overview.items[0]) {
+      setSelectedBranchId(bootstrap.branch_overview.items[0].id);
+    }
+  }, [bootstrap, selectedBranchId]);
+
+  useEffect(() => {
+    if (!selectedUser) {
+      setSelectedUserBranchId("");
+      return;
+    }
+    const activeBranch = selectedUser.branches.find((branch) => branch.is_active) ?? selectedUser.branches[0] ?? null;
+    setSelectedUserBranchId(activeBranch ? String(activeBranch.id) : "");
+  }, [selectedUser]);
+
   if (bootstrapQuery.isPending) {
     return (
       <div className="empty-state">
         <strong>Собираем контур управления…</strong>
-        <p>Подтягиваем команду, инвайты и operational-сигналы.</p>
+        <p>Подтягиваем команду, ветки и operational-сигналы.</p>
       </div>
     );
   }
@@ -254,13 +355,13 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
     );
   }
 
-  const userSection = (
+  const teamSection = (
     <div className="panel-stack">
       <section className="section-card">
         <header className="section-head">
           <div>
             <h3>Команда</h3>
-            <p>Быстрый обзор по людям, ролям и веткам без перегрузки лишними настройками.</p>
+            <p>Люди, роли и состояние сети без лишнего операционного шума.</p>
           </div>
           <span className="pill tone-neutral">{usersQuery.data?.meta.count ?? users.length}</span>
         </header>
@@ -298,6 +399,34 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
           </label>
         </div>
         {usersQuery.error ? <p className="inline-error">{errorText(usersQuery.error, "Не удалось загрузить команду")}</p> : null}
+        {bootstrap.capabilities.can_manage_branches ? (
+          <div className="stack-form">
+            <div className="row-grid">
+              <label>
+                <span className="muted">Новая ветка</span>
+                <input
+                  className="input"
+                  value={newBranchName}
+                  onChange={(event) => setNewBranchName(event.target.value)}
+                  placeholder="Например: Север, Центр, Экспресс"
+                />
+              </label>
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={createBranchMutation.isPending || newBranchName.trim().length < 2}
+                  onClick={() => void createBranchMutation.mutateAsync()}
+                >
+                  {createBranchMutation.isPending ? "Создаём…" : "Создать ветку"}
+                </button>
+              </div>
+            </div>
+            {createBranchMutation.error ? (
+              <p className="inline-error">{errorText(createBranchMutation.error, "Не удалось создать ветку")}</p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="card-list">
           {users.map((user) => (
             <button
@@ -334,14 +463,14 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
           <header className="section-head">
             <div>
               <h3>Кадровое действие</h3>
-              <p>Точный action flow по выбранному человеку, без лишних экранов и hidden-состояний.</p>
+              <p>Один точный composer по выбранному человеку без прыжков между старыми callback-экранами.</p>
             </div>
             {selectedUser ? <span className="pill tone-neutral">{selectedUser.name}</span> : null}
           </header>
           {!selectedUser ? (
-            <p className="muted">Выберите человека выше, чтобы открыть компактный action composer.</p>
+            <p className="muted">Выберите человека выше, чтобы открыть action composer.</p>
           ) : !selectedUser.can_manage ? (
-            <p className="muted">Для выбранного человека у текущей роли нет права на кадровое действие.</p>
+            <p className="muted">Для выбранного человека у текущей роли нет прав на кадровые действия.</p>
           ) : (
             <div className="stack-form">
               <div className="row-grid">
@@ -397,7 +526,7 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
                   className="textarea compact"
                   value={staffingReason}
                   onChange={(event) => setStaffingReason(event.target.value)}
-                  placeholder="Коротко и по делу: почему это действие нужно сейчас."
+                  placeholder="Коротко и по делу: зачем это действие нужно сейчас."
                 />
               </label>
               <div className="action-row">
@@ -417,9 +546,262 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
           )}
         </section>
       ) : null}
+
+      {canManageSelectedUser ? (
+        <section className="section-card">
+          <header className="section-head">
+            <div>
+              <h3>Роли и ветка</h3>
+              <p>Тихое управление доступом и принадлежностью без старых callback-экранов.</p>
+            </div>
+            {selectedUser ? <span className="pill tone-neutral">{selectedUser.name}</span> : null}
+          </header>
+          {!selectedUser ? (
+            <p className="muted">Выберите человека из списка выше.</p>
+          ) : (
+            <div className="stack-form">
+              {bootstrap.capabilities.can_manage_users && bootstrap.ui.role_management_options.length ? (
+                <div className="stack-form">
+                  <div>
+                    <span className="muted">Прямые роли</span>
+                    <div className="tag-row">
+                      {selectedUser.roles.map((roleCode) => (
+                        <span key={roleCode} className="tag">
+                          {roleLabel(roleCode)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="action-row">
+                    {bootstrap.ui.role_management_options.map((option) => {
+                      const enabled = selectedUser.roles.includes(option.code);
+                      return (
+                        <button
+                          key={option.code}
+                          type="button"
+                          className={`btn ${enabled ? "btn-primary" : ""}`}
+                          disabled={updateUserRoleMutation.isPending}
+                          onClick={() =>
+                            void updateUserRoleMutation.mutateAsync({
+                              targetExternalUserId: selectedUser.external_user_id,
+                              roleCode: option.code,
+                              enabled: !enabled,
+                            })
+                          }
+                        >
+                          {enabled ? `Убрать ${option.label}` : `Выдать ${option.label}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {updateUserRoleMutation.error ? (
+                    <p className="inline-error">
+                      {errorText(updateUserRoleMutation.error, "Не удалось обновить роли")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {bootstrap.capabilities.can_manage_branches ? (
+                !selectedUserCanBelongToBranch ? (
+                  <div className="glass-card compact-card align-start">
+                    <strong>Ветка недоступна</strong>
+                    <p className="muted">Сначала у пользователя должна быть прямая роль мастера или старшего мастера.</p>
+                  </div>
+                ) : (
+                  <div className="stack-form">
+                    <label>
+                      <span className="muted">Активная ветка</span>
+                      <select
+                        className="input"
+                        value={selectedUserBranchId}
+                        onChange={(event) => setSelectedUserBranchId(event.target.value)}
+                      >
+                        <option value="">Без ветки</option>
+                        {bootstrap.branches.map((branch) => (
+                          <option key={branch.id} value={branch.id}>
+                            {branch.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="action-row">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={assignUserBranchMutation.isPending}
+                        onClick={() =>
+                          void assignUserBranchMutation.mutateAsync({
+                            targetExternalUserId: selectedUser.external_user_id,
+                            branchId: selectedUserBranchId ? Number(selectedUserBranchId) : null,
+                          })
+                        }
+                      >
+                        {assignUserBranchMutation.isPending ? "Сохраняем…" : "Сохранить ветку"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={assignUserBranchMutation.isPending || !selectedUser.branches.length}
+                        onClick={() =>
+                          void assignUserBranchMutation.mutateAsync({
+                            targetExternalUserId: selectedUser.external_user_id,
+                            branchId: null,
+                          })
+                        }
+                      >
+                        Снять с ветки
+                      </button>
+                    </div>
+                    {assignUserBranchMutation.error ? (
+                      <p className="inline-error">
+                        {errorText(assignUserBranchMutation.error, "Не удалось обновить ветку")}
+                      </p>
+                    ) : null}
+                  </div>
+                )
+              ) : null}
+            </div>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 
+  const branchesSection = (
+    <div className="panel-stack">
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Ветки</h3>
+            <p>Старшие мастера и owner получают один обзор по людям, объёму и выручке.</p>
+          </div>
+          <span className="pill tone-neutral">{bootstrap.branch_overview.meta.count}</span>
+        </header>
+        <div className="card-list">
+          {bootstrap.branch_overview.items.map((branch) => (
+            <button
+              key={branch.id}
+              type="button"
+              className={`metric-card task-card ${selectedBranch?.id === branch.id ? "active-card" : ""}`}
+              onClick={() => setSelectedBranchId(branch.id)}
+            >
+              <div className="card-topline">
+                <strong>{branch.name}</strong>
+                <span className="pill tone-neutral">{branch.member_count} в сети</span>
+              </div>
+              <div className="tag-row">
+                {branch.senior_name ? <span className="tag">Senior: {branch.senior_name}</span> : null}
+                <span className="tag">{branch.active_master_count} мастеров</span>
+                <span className="tag">{branch.completed_orders} заказов</span>
+              </div>
+              <p className="muted">
+                {branch.estimate_count} смет · {money(branch.revenue)} ₽ оборот
+              </p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {selectedBranch ? (
+        <section className="section-card">
+          <header className="section-head">
+            <div>
+              <h3>{selectedBranch.name}</h3>
+              <p>Веточные сценарии собраны в одном месте: люди, метрики и вход в работу.</p>
+            </div>
+            <div className="tag-row">
+              {selectedBranch.senior_name ? <span className="tag">{selectedBranch.senior_name}</span> : null}
+              <span className="tag">{selectedBranch.member_count} участников</span>
+            </div>
+          </header>
+          <div className="metric-grid dense">
+            <article className="metric-card">
+              <span>Мастера</span>
+              <strong>{selectedBranch.active_master_count}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Сметы</span>
+              <strong>{selectedBranch.estimate_count}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Заказы</span>
+              <strong>{selectedBranch.completed_orders}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Оборот</span>
+              <strong>{money(selectedBranch.revenue)}</strong>
+            </article>
+          </div>
+          <div className="action-row">
+            {bootstrap.capabilities.can_create_invites ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setInviteBranchId(String(selectedBranch.id));
+                  setTab("invites");
+                }}
+              >
+                Инвайт в ветку
+              </button>
+            ) : null}
+            {bootstrap.capabilities.can_view_team ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const firstMember = selectedBranch.members.find((member) => !member.is_senior) ?? selectedBranch.members[0];
+                  if (firstMember?.external_user_id) {
+                    setSelectedUserId(firstMember.external_user_id);
+                  }
+                  setTab("team");
+                }}
+              >
+                Открыть команду
+              </button>
+            ) : null}
+          </div>
+          <div className="card-list">
+            {selectedBranch.members.length ? (
+              selectedBranch.members.map((member) => (
+                <button
+                  key={`${selectedBranch.id}-${member.user_id}`}
+                  type="button"
+                  className="glass-card compact-card align-start"
+                  onClick={() => {
+                    if (member.external_user_id) {
+                      setSelectedUserId(member.external_user_id);
+                    }
+                    if (bootstrap.capabilities.can_view_team) {
+                      setTab("team");
+                    }
+                  }}
+                >
+                  <div className="card-topline">
+                    <strong>{member.name}</strong>
+                    <span className={`pill ${member.is_active ? "tone-success" : "tone-muted"}`}>
+                      {member.is_active ? "Активен" : "Неактивен"}
+                    </span>
+                  </div>
+                  <div className="tag-row">
+                    <span className="tag">{member.is_senior ? "Старший мастер" : "Мастер"}</span>
+                    {member.external_user_id ? <span className="tag">ID {member.external_user_id}</span> : null}
+                  </div>
+                  <p className="muted">{member.completed_orders} завершённых заказов</p>
+                </button>
+              ))
+            ) : (
+              <div className="empty-state">
+                <strong>Ветка пока пустая</strong>
+                <p>Добавьте мастеров через инвайт или кадровое действие.</p>
+              </div>
+            )}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
   const invitesSection = (
     <div className="panel-stack">
       {bootstrap.capabilities.can_create_invites ? (
@@ -427,7 +809,7 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
           <header className="section-head">
             <div>
               <h3>Новый инвайт</h3>
-              <p>Один лёгкий composer вместо длинной админской ветки в боте.</p>
+              <p>Один компактный composer вместо длинной админской ветки в боте.</p>
             </div>
           </header>
           <div className="stack-form">
@@ -503,7 +885,13 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
               <div className="card-topline">
                 <strong className="mono-code">{invite.code}</strong>
                 <span className={`pill ${toneForInvite(invite)}`}>
-                  {invite.is_expired ? "Просрочен" : invite.is_exhausted ? "Использован" : invite.requires_approval ? "Через модерацию" : "Активен"}
+                  {invite.is_expired
+                    ? "Просрочен"
+                    : invite.is_exhausted
+                      ? "Использован"
+                      : invite.requires_approval
+                        ? "Через модерацию"
+                        : "Активен"}
                 </span>
               </div>
               <div className="tag-row">
@@ -646,12 +1034,153 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
     </div>
   );
 
+  const insightsSection = bootstrap.insights ? (
+    <div className="panel-stack">
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Обзор платформы</h3>
+            <p>Ключевая картина по росту, экономике и состоянию сервиса без перегруженных дашбордов.</p>
+          </div>
+        </header>
+        <div className="metric-grid dense">
+          <article className="metric-card"><span>Пользователи</span><strong>{bootstrap.insights.overview.users}</strong></article>
+          <article className="metric-card"><span>Мастера</span><strong>{bootstrap.insights.overview.masters}</strong></article>
+          <article className="metric-card"><span>Сметы</span><strong>{bootstrap.insights.overview.estimates}</strong></article>
+          <article className="metric-card"><span>Заказы</span><strong>{bootstrap.insights.overview.orders}</strong></article>
+          <article className="metric-card"><span>Оборот</span><strong>{money(bootstrap.insights.overview.gross)}</strong></article>
+          <article className="metric-card"><span>Net платформы</span><strong>{money(bootstrap.insights.overview.platform_net)}</strong></article>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Финансы</h3>
+            <p>Вместо отдельных owner finance и commissions экранов.</p>
+          </div>
+        </header>
+        <div className="metric-grid dense">
+          <article className="metric-card"><span>Platform fee</span><strong>{money(bootstrap.insights.finance.platform_fee)}</strong></article>
+          <article className="metric-card"><span>Senior share</span><strong>{money(bootstrap.insights.finance.senior_share)}</strong></article>
+          <article className="metric-card"><span>Admin share</span><strong>{money(bootstrap.insights.finance.admin_share)}</strong></article>
+          <article className="metric-card"><span>Master net</span><strong>{money(bootstrap.insights.finance.master_net)}</strong></article>
+          <article className="metric-card"><span>Скидки</span><strong>{money(bootstrap.insights.finance.discounts_total)}</strong></article>
+          <article className="metric-card"><span>Net платформы</span><strong>{money(bootstrap.insights.finance.platform_net)}</strong></article>
+        </div>
+        <div className="card-list">
+          {bootstrap.insights.finance.recent_commissions.map((record) => (
+            <article key={record.id} className="glass-card compact-card align-start">
+              <div className="card-topline">
+                <strong>Заказ #{record.order_id ?? "?"}</strong>
+                <span className="muted">{formatAgo(record.calculated_at)}</span>
+              </div>
+              <div className="tag-row">
+                <span className="tag">Gross {money(record.gross_total)}</span>
+                <span className="tag">Fee {money(record.platform_fee)}</span>
+                <span className="tag">Master {money(record.master_net)}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Воронка</h3>
+            <p>Живое состояние заказов без отдельного owner funnel экрана.</p>
+          </div>
+        </header>
+        <div className="metric-grid dense">
+          {Object.entries(bootstrap.insights.funnel).map(([status, count]) => (
+            <article key={status} className="metric-card">
+              <span>{status}</span>
+              <strong>{count}</strong>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Лидеры мастеров</h3>
+            <p>Топ мастеров по выручке и объёму завершённых заказов.</p>
+          </div>
+        </header>
+        <div className="card-list">
+          {bootstrap.insights.masters.length ? (
+            bootstrap.insights.masters.map((master, index) => (
+              <article key={master.user_id} className="glass-card compact-card align-start">
+                <div className="card-topline">
+                  <strong>
+                    {index + 1}. {master.name}
+                  </strong>
+                  {master.external_user_id ? <span className="tag">ID {master.external_user_id}</span> : null}
+                </div>
+                <p className="muted">
+                  {master.order_count} заказов · {money(master.revenue)} ₽
+                </p>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              <strong>Пока без рейтинга</strong>
+              <p>Когда появятся подтверждённые выплаты, лидеры покажутся здесь.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Скидки</h3>
+            <p>Сводка по discount flow без отдельного owner discounts экрана.</p>
+          </div>
+        </header>
+        <div className="metric-grid dense">
+          <article className="metric-card"><span>Всего запросов</span><strong>{bootstrap.insights.discounts.total_requests}</strong></article>
+          <article className="metric-card"><span>Одобрено</span><strong>{bootstrap.insights.discounts.approved}</strong></article>
+          <article className="metric-card"><span>Отклонено</span><strong>{bootstrap.insights.discounts.rejected}</strong></article>
+          <article className="metric-card"><span>Ожидают</span><strong>{bootstrap.insights.discounts.pending}</strong></article>
+          <article className="metric-card"><span>Сумма скидок</span><strong>{money(bootstrap.insights.discounts.total_amount)}</strong></article>
+          <article className="metric-card"><span>Approval rate</span><strong>{bootstrap.insights.discounts.approval_rate}%</strong></article>
+        </div>
+      </section>
+
+      <section className="section-card">
+        <header className="section-head">
+          <div>
+            <h3>Настройки среды</h3>
+            <p>Короткий owner snapshot вместо отдельного settings callback-экрана.</p>
+          </div>
+        </header>
+        <div className="tag-row">
+          <span className="tag">{bootstrap.insights.settings.platform_operator_name}</span>
+          <span className="tag">{bootstrap.insights.settings.platform_name}</span>
+          <span className="tag">Fee {bootstrap.insights.settings.platform_fee_pct}%</span>
+          <span className="tag">Senior {bootstrap.insights.settings.senior_master_share_pct}%</span>
+          <span className="tag">Admin {bootstrap.insights.settings.admin_share_pct}%</span>
+          <span className="tag">{bootstrap.insights.settings.default_city}</span>
+          <span className="tag">{bootstrap.insights.settings.default_region}</span>
+          <span className="tag">AI: {bootstrap.insights.settings.ai_provider}</span>
+          <span className="tag">Env: {bootstrap.insights.settings.app_env}</span>
+        </div>
+        {bootstrap.insights.settings.webapp_url ? (
+          <p className="muted">Mini App URL: {bootstrap.insights.settings.webapp_url}</p>
+        ) : null}
+      </section>
+    </div>
+  ) : <div />;
+
   const flagsSection = (
     <section className="section-card">
       <header className="section-head">
         <div>
           <h3>Фича-флаги</h3>
-          <p>Тонкая операционная настройка без погружения в сырой backend.</p>
+          <p>Тонкая operational-настройка без погружения в сырой backend.</p>
         </div>
       </header>
       <div className="card-list">
@@ -693,7 +1222,7 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
         <header className="section-head">
           <div>
             <h3>Control Center</h3>
-            <p>Один тихий operational-слой вместо тяжёлой россыпи служебных экранов.</p>
+            <p>Один тихий operational-слой вместо россыпи служебных бот-сценариев.</p>
           </div>
         </header>
         <div className="metric-grid dense">
@@ -728,9 +1257,11 @@ export function ControlCenterPanel({ externalUserId }: { externalUserId: number 
         </div>
       </section>
 
-      {tab === "team" ? userSection : null}
+      {tab === "team" ? teamSection : null}
+      {tab === "branches" ? branchesSection : null}
       {tab === "invites" ? invitesSection : null}
       {tab === "moderation" ? moderationSection : null}
+      {tab === "insights" ? insightsSection : null}
       {tab === "flags" ? flagsSection : null}
     </div>
   );

@@ -11,6 +11,7 @@ import type {
   EstimateQrPayload,
   EstimateSummary,
   JobPost,
+  JobPostResponseList,
   LayoutPayload,
   MasterProfileResponse,
   MasterReviewItem,
@@ -41,6 +42,7 @@ type SessionSnapshot = {
   accessToken: string;
   externalUserId: number;
   expiresAt: number;
+  auth: AuthResponse;
 };
 
 let sessionSnapshot: SessionSnapshot | null = null;
@@ -55,7 +57,7 @@ function readStoredSession(): SessionSnapshot | null {
   }
   try {
     const parsed = JSON.parse(raw) as SessionSnapshot;
-    if (!parsed.accessToken || !parsed.externalUserId || !parsed.expiresAt) {
+    if (!parsed.accessToken || !parsed.externalUserId || !parsed.expiresAt || !parsed.auth) {
       return null;
     }
     if (parsed.expiresAt * 1000 <= Date.now()) {
@@ -75,8 +77,13 @@ function persistSession(auth: AuthResponse): void {
     accessToken: auth.access_token,
     externalUserId: auth.telegram_id,
     expiresAt: auth.expires_at,
+    auth,
   };
   window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionSnapshot));
+}
+
+function hasActiveSession(): boolean {
+  return Boolean(readStoredSession());
 }
 
 function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
@@ -159,8 +166,13 @@ async function requestBlob(
 }
 
 export const api = {
+  hasActiveSession,
   async auth(): Promise<AuthResponse> {
     const bridge = resolveBridge();
+    const cachedSession = readStoredSession();
+    if (!bridge.initData && cachedSession?.auth) {
+      return cachedSession.auth;
+    }
     const response = await request<AuthResponse>("/auth", {
       method: "POST",
       body: {
@@ -203,6 +215,9 @@ export const api = {
       method: "POST",
       body,
     });
+  },
+  listBoardResponses(externalUserId: number, postId: number) {
+    return request<JobPostResponseList>(`/board/posts/${postId}/responses`);
   },
   listMasters(externalUserId: number, params?: Record<string, string | number | boolean | undefined>) {
     return request<NetworkResponse>("/network/masters", {
@@ -378,8 +393,40 @@ export const api = {
       params,
     });
   },
+  updateControlUserRole(
+    externalUserId: number,
+    targetExternalUserId: number,
+    body: { role_code: string; enabled: boolean },
+  ) {
+    return request<ControlBootstrapResponse["users"]["items"][number]>(
+      `/control/users/${targetExternalUserId}/roles`,
+      {
+        method: "PUT",
+        body,
+      },
+    );
+  },
+  assignControlUserBranch(
+    externalUserId: number,
+    targetExternalUserId: number,
+    body: { branch_id: number | null },
+  ) {
+    return request<ControlBootstrapResponse["users"]["items"][number]>(
+      `/control/users/${targetExternalUserId}/branch`,
+      {
+        method: "PUT",
+        body,
+      },
+    );
+  },
   createControlInvite(externalUserId: number, body: Record<string, unknown>) {
     return request<ControlBootstrapResponse["invites"]["items"][number]>("/control/invites", {
+      method: "POST",
+      body,
+    });
+  },
+  createControlBranch(externalUserId: number, body: { name: string }) {
+    return request<ControlBootstrapResponse["branches"][number]>("/control/branches", {
       method: "POST",
       body,
     });

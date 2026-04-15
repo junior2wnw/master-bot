@@ -25,9 +25,46 @@ export interface BridgeContext {
   embedded: boolean;
 }
 
+const LAUNCH_DATA_STORAGE_KEY = "pridel.launchData";
+
 function isLocalDevHost(): boolean {
   const host = window.location.hostname.toLowerCase();
   return host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+}
+
+function persistLaunchData(initData: string): void {
+  if (!initData) {
+    return;
+  }
+  window.sessionStorage.setItem(LAUNCH_DATA_STORAGE_KEY, initData);
+}
+
+function readStoredLaunchData(): string {
+  return window.sessionStorage.getItem(LAUNCH_DATA_STORAGE_KEY) ?? "";
+}
+
+function readHashLaunchData(): string {
+  const rawHash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  if (!rawHash) {
+    return "";
+  }
+
+  const params = new URLSearchParams(rawHash);
+  const initData =
+    params.get("WebAppData") ??
+    params.get("tgWebAppData") ??
+    params.get("init_data") ??
+    params.get("initData") ??
+    "";
+  if (!initData) {
+    return "";
+  }
+
+  persistLaunchData(initData);
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  return initData;
 }
 
 function readDevPayload(): string {
@@ -52,22 +89,41 @@ function readDevPayload(): string {
 export function resolveBridge(): BridgeContext {
   const maxBridge = window.WebApp;
   const telegramBridge = window.Telegram?.WebApp;
-  const hasMax = Boolean(maxBridge?.initData);
-  const hasTelegram = Boolean(telegramBridge?.initData);
-  const embedded = hasMax || hasTelegram;
+  const maxInitData = maxBridge?.initData ?? "";
+  const telegramInitData = telegramBridge?.initData ?? "";
+  const hashInitData = readHashLaunchData();
+  const storedInitData = readStoredLaunchData();
 
-  if (hasMax) {
+  if (maxInitData) {
+    persistLaunchData(maxInitData);
     return {
       platform: "max",
-      initData: maxBridge?.initData ?? "",
+      initData: maxInitData,
       embedded: true,
     };
   }
 
-  if (hasTelegram) {
+  if (telegramInitData) {
+    persistLaunchData(telegramInitData);
     return {
       platform: "telegram",
-      initData: telegramBridge?.initData ?? "",
+      initData: telegramInitData,
+      embedded: true,
+    };
+  }
+
+  if (hashInitData) {
+    return {
+      platform: "max",
+      initData: hashInitData,
+      embedded: true,
+    };
+  }
+
+  if (storedInitData) {
+    return {
+      platform: "max",
+      initData: storedInitData,
       embedded: true,
     };
   }
@@ -90,6 +146,10 @@ export function resolveBridge(): BridgeContext {
 export function prepareBridge(): void {
   const maxBridge = window.WebApp;
   const telegramBridge = window.Telegram?.WebApp;
+  const hashInitData = readHashLaunchData();
+  if (hashInitData) {
+    persistLaunchData(hashInitData);
+  }
   maxBridge?.ready?.();
   maxBridge?.expand?.();
   maxBridge?.enableClosingConfirmation?.();

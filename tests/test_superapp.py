@@ -141,6 +141,64 @@ async def test_job_post_response_creates_notification_and_blocks_duplicate(monke
 
 
 @pytest.mark.asyncio
+async def test_job_post_responses_are_visible_to_owner_only(monkeypatch):
+    engine, session_factory = await _make_session_factory()
+    monkeypatch.setattr(superapp_svc, "log_audit", _noop)
+
+    async with session_factory() as session:
+        author = User(telegram_id=2101, first_name="Client")
+        master = User(telegram_id=2102, first_name="Master")
+        outsider = User(telegram_id=2103, first_name="Other")
+        session.add_all([author, master, outsider])
+        await session.flush()
+        session.add_all(
+            [
+                UserRole(user_id=author.id, role_code="client"),
+                UserRole(user_id=master.id, role_code="master"),
+                UserRole(user_id=outsider.id, role_code="client"),
+            ]
+        )
+        await session.flush()
+        await session.refresh(master, ["roles"])
+        await session.refresh(outsider, ["roles"])
+
+        post = await superapp_svc.create_job_post(
+            session,
+            author=author,
+            title="Собрать шкаф",
+            description="Нужно аккуратно собрать новый шкаф и выставить по уровню.",
+            city="Уфа",
+            urgency="urgent",
+        )
+        await superapp_svc.respond_to_job_post(
+            session,
+            viewer=master,
+            post_id=post["id"],
+            message="Возьму сегодня после 18:00, инструмент привезу с собой.",
+            price_offer=3200,
+            eta_label="Сегодня вечером",
+        )
+
+        visible = await superapp_svc.list_job_post_responses(
+            session,
+            viewer=author,
+            post_id=post["id"],
+        )
+        assert visible["meta"]["count"] == 1
+        assert visible["items"][0]["responder"]["external_id"] == master.telegram_id
+        assert visible["items"][0]["price_offer"] == 3200
+
+        with pytest.raises(superapp_svc.PermissionDenied):
+            await superapp_svc.list_job_post_responses(
+                session,
+                viewer=outsider,
+                post_id=post["id"],
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_public_master_profile_must_be_published_for_network_listing(monkeypatch):
     engine, session_factory = await _make_session_factory()
     monkeypatch.setattr(superapp_svc, "log_audit", _noop)

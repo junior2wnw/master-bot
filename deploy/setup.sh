@@ -84,6 +84,22 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+compose_project_name() {
+    if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+        printf '%s' "$COMPOSE_PROJECT_NAME"
+        return 0
+    fi
+    basename "$PROJECT_DIR"
+}
+
+extract_host_from_url() {
+    local input="$1"
+    if [[ -z "$input" ]]; then
+        return 1
+    fi
+    printf '%s' "$input" | sed -E 's#^https?://([^/]+).*#\1#'
+}
+
 case "${MAX_DELIVERY_MODE}" in
     auto|webhook|polling) ;;
     *)
@@ -322,6 +338,43 @@ docker compose build --quiet app
 
 log "Запускаем контейнеры..."
 docker compose up -d
+
+# === HTTPS reverse proxy ===
+header "HTTPS reverse proxy (Caddy)"
+
+COMPOSE_PROJECT="$(compose_project_name)"
+CADDY_NETWORK="${COMPOSE_PROJECT}_default"
+CADDY_HOST="$(extract_host_from_url "$WEBAPP_URL" || true)"
+
+if [[ -z "$CADDY_HOST" ]]; then
+    warn "WEBAPP_URL РЅРµ Р·Р°РґР°РЅ РёР»Рё РЅРµРІР°Р»РёРґРµРЅ вЂ” РїСЂРѕРїСѓСЃРєР°РµРј РЅР°СЃС‚СЂРѕР№РєСѓ Caddy"
+else
+    if [[ ! -f Caddyfile ]]; then
+        cat > Caddyfile <<CADDYEOF
+${CADDY_HOST} {
+    encode gzip zstd
+    reverse_proxy app:8000
+}
+CADDYEOF
+        log "Caddyfile СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅ РґР»СЏ ${CADDY_HOST}"
+    else
+        log "РСЃРїРѕР»СЊР·СѓРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ Caddyfile РёР· РєРѕСЂРЅСЏ РїСЂРѕРµРєС‚Р°"
+    fi
+
+    docker rm -f pridel-caddy >/dev/null 2>&1 || true
+    docker run -d \
+        --name pridel-caddy \
+        --restart unless-stopped \
+        --network "${CADDY_NETWORK}" \
+        -p 80:80 \
+        -p 443:443 \
+        -v "${PROJECT_DIR}/Caddyfile:/etc/caddy/Caddyfile:ro" \
+        -v pridel_caddy_data:/data \
+        -v pridel_caddy_config:/config \
+        caddy:2 >/dev/null
+
+    log "Caddy Р·Р°РїСѓС‰РµРЅ РІ СЃРµС‚Рё ${CADDY_NETWORK}"
+fi
 
 # === Wait for DB ===
 header "Ожидание готовности PostgreSQL"

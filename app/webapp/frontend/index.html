@@ -13,14 +13,33 @@
       name="description"
       content="ПриДел от 4-2 — лёгкий супер-интерфейс для заявок, мастеров и рабочего пространства."
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
     <script src="https://st.max.ru/js/max-web-app.js"></script>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      (function () {
+        var rawHash = window.location.hash ? window.location.hash.slice(1) : "";
+        if (rawHash) {
+          var params = new URLSearchParams(rawHash);
+          var initData =
+            params.get("WebAppData") ||
+            params.get("tgWebAppData") ||
+            params.get("init_data") ||
+            params.get("initData") ||
+            "";
+          if (initData) {
+            window.sessionStorage.setItem("pridel.launchData", initData);
+            window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          }
+        }
+
+        try {
+          if (window.WebApp && typeof window.WebApp.ready === "function") {
+            window.WebApp.ready();
+          }
+        } catch (error) {
+          console.warn("MAX ready bootstrap failed", error);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

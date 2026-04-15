@@ -704,6 +704,28 @@ def _serialize_job_post(
     }
 
 
+def _serialize_job_post_response(
+    *,
+    response: JobPostResponse,
+    responder: User,
+) -> dict:
+    return {
+        "id": response.id,
+        "job_post_id": response.job_post_id,
+        "status": response.status,
+        "message": response.message,
+        "price_offer": response.price_offer,
+        "eta_label": response.eta_label,
+        "created_at": response.created_at.isoformat() if response.created_at else None,
+        "responder": {
+            "id": responder.id,
+            "external_id": responder.telegram_id,
+            "name": responder.display_name,
+            "username": responder.username,
+        },
+    }
+
+
 async def list_job_posts(
     session: AsyncSession,
     *,
@@ -768,6 +790,50 @@ async def list_job_posts(
             for post in posts
         ],
         "meta": {"limit": limit, "offset": offset},
+    }
+
+
+async def list_job_post_responses(
+    session: AsyncSession,
+    *,
+    viewer: User,
+    post_id: int,
+) -> dict:
+    post = await session.get(JobPost, post_id)
+    if not post:
+        raise NotFoundError("Заявка")
+    if post.author_user_id != viewer.id and not _can_view_control(viewer):
+        raise PermissionDenied("Отклики доступны только автору заявки")
+
+    rows = list(
+        (
+            await session.execute(
+                select(JobPostResponse, User)
+                .join(User, User.id == JobPostResponse.responder_user_id)
+                .where(JobPostResponse.job_post_id == post_id)
+                .order_by(JobPostResponse.created_at.desc(), JobPostResponse.id.desc())
+            )
+        ).all()
+    )
+
+    return {
+        "post": _serialize_job_post(
+            post=post,
+            author=viewer if post.author_user_id == viewer.id else (await session.get(User, post.author_user_id)),
+            response_count=len(rows),
+            has_responded=False,
+            viewer=viewer,
+        ),
+        "items": [
+            _serialize_job_post_response(
+                response=response,
+                responder=responder,
+            )
+            for response, responder in rows
+        ],
+        "meta": {
+            "count": len(rows),
+        },
     }
 
 

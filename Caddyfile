@@ -1,0 +1,8 @@
+4-2.xn--p1ai {
+    encode gzip zstd
+    reverse_proxy app:8000
+}
+
+193.47.43.64.sslip.io {
+    redir https://4-2.xn--p1ai{uri} 308
+}

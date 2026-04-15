@@ -13,7 +13,9 @@ from app.api.shared import get_current_user
 from app.core.exceptions import NotFoundError, PermissionDenied, ValidationError
 from app.models.user import User
 from app.services.control_center import (
+    assign_control_user_branch,
     build_control_center_bootstrap,
+    create_control_branch,
     create_control_invite,
     create_control_staffing_action,
     list_accessible_branches,
@@ -25,6 +27,7 @@ from app.services.control_center import (
     moderate_control_staffing_action,
     moderate_invite_activation,
     toggle_control_feature_flag,
+    update_control_user_role,
 )
 
 router = APIRouter(prefix="/api/v1/control", tags=["control"])
@@ -53,6 +56,15 @@ class ModerateInviteRequest(BaseModel):
     action: Literal["approve", "reject"]
 
 
+class ControlUserRoleUpdateRequest(BaseModel):
+    role_code: str = Field(min_length=3, max_length=30)
+    enabled: bool
+
+
+class ControlUserBranchUpdateRequest(BaseModel):
+    branch_id: int | None = Field(default=None, ge=1)
+
+
 class CreateStaffingActionRequest(BaseModel):
     external_user_id: int
     action_type: str = Field(min_length=3, max_length=30)
@@ -68,6 +80,10 @@ class ModerateStaffingRequest(BaseModel):
 
 class FeatureFlagUpdateRequest(BaseModel):
     enabled: bool
+
+
+class CreateBranchRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
 
 
 @router.get("/bootstrap")
@@ -105,6 +121,43 @@ async def control_users(
         _raise_http(exc)
 
 
+@router.put("/users/{external_user_id}/roles")
+async def control_update_user_role(
+    external_user_id: int,
+    body: ControlUserRoleUpdateRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        return await update_control_user_role(
+            session,
+            viewer=user,
+            external_user_id=external_user_id,
+            role_code=body.role_code,
+            enabled=body.enabled,
+        )
+    except (ValidationError, PermissionDenied, NotFoundError) as exc:
+        _raise_http(exc)
+
+
+@router.put("/users/{external_user_id}/branch")
+async def control_assign_user_branch(
+    external_user_id: int,
+    body: ControlUserBranchUpdateRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        return await assign_control_user_branch(
+            session,
+            viewer=user,
+            external_user_id=external_user_id,
+            branch_id=body.branch_id,
+        )
+    except (ValidationError, PermissionDenied, NotFoundError) as exc:
+        _raise_http(exc)
+
+
 @router.get("/branches")
 async def control_branches(
     user: User = Depends(get_current_user),
@@ -112,6 +165,22 @@ async def control_branches(
 ):
     try:
         return await list_accessible_branches(session, viewer=user)
+    except (ValidationError, PermissionDenied, NotFoundError) as exc:
+        _raise_http(exc)
+
+
+@router.post("/branches")
+async def control_create_branch(
+    body: CreateBranchRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        return await create_control_branch(
+            session,
+            viewer=user,
+            name=body.name,
+        )
     except (ValidationError, PermissionDenied, NotFoundError) as exc:
         _raise_http(exc)
 

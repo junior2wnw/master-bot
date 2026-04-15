@@ -16,6 +16,7 @@ from app.services.superapp import (
     get_master_network_profile,
     get_public_master_profile_for_edit,
     get_workspace_layout,
+    list_job_post_responses,
     list_job_posts,
     list_master_network,
     respond_to_job_post,
@@ -154,6 +155,22 @@ async def post_board_response(
             viewer=user,
             post_id=post_id,
             **body.model_dump(),
+        )
+    except (ValidationError, ConflictError, PermissionDenied, NotFoundError) as exc:
+        _raise_http(exc)
+
+
+@router.get("/board/posts/{post_id}/responses")
+async def get_board_post_responses(
+    post_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        return await list_job_post_responses(
+            session,
+            viewer=user,
+            post_id=post_id,
         )
     except (ValidationError, ConflictError, PermissionDenied, NotFoundError) as exc:
         _raise_http(exc)

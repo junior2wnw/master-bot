@@ -6,7 +6,44 @@ import hashlib
 import hmac
 import json
 import time
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, unquote, urlsplit
+
+SIGNED_PAYLOAD_KEYS = ("WebAppData", "tgWebAppData", "init_data", "initData")
+
+
+def normalize_webapp_init_data(raw_value: str) -> str:
+    """Extract signed Mini App payload from raw init data, hash fragments, or full URLs."""
+    if not raw_value:
+        return ""
+
+    candidate = raw_value.strip()
+    if not candidate:
+        return ""
+
+    if "://" in candidate:
+        parsed_url = urlsplit(candidate)
+        for container in (parsed_url.fragment, parsed_url.query):
+            extracted = _extract_signed_payload(container)
+            if extracted:
+                return extracted
+        candidate = parsed_url.fragment or parsed_url.query or candidate
+
+    if candidate.startswith("#"):
+        candidate = candidate[1:]
+
+    return _extract_signed_payload(candidate) or candidate
+
+
+def _extract_signed_payload(container: str) -> str | None:
+    if not container:
+        return None
+
+    parsed = parse_qs(container, keep_blank_values=True)
+    for key in SIGNED_PAYLOAD_KEYS:
+        value = parsed.get(key, [None])[0]
+        if value:
+            return value
+    return None
 
 
 def validate_webapp_init_data(
@@ -20,7 +57,8 @@ def validate_webapp_init_data(
         return None
 
     try:
-        parsed = parse_qs(init_data, keep_blank_values=True)
+        normalized_init_data = normalize_webapp_init_data(init_data)
+        parsed = parse_qs(normalized_init_data, keep_blank_values=True)
         check_hash = parsed.get("hash", [None])[0]
         if not check_hash:
             return None

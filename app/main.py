@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 import structlog
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.control import router as control_router
 from app.api.admin import router as admin_router
+from app.api.control import router as control_router
 from app.api.health import router as health_router
 from app.api.max_webhook import router as max_webhook_router
 from app.api.superapp import router as superapp_router
@@ -104,6 +105,15 @@ def create_app() -> FastAPI:
     dist_dir = webapp_dir / "dist"
     static_dir = dist_dir if dist_dir.exists() else webapp_dir
     if static_dir.exists():
+        index_file = static_dir / "index.html"
+        if index_file.exists():
+
+            @app.get("/app", include_in_schema=False)
+            @app.head("/app", include_in_schema=False)
+            async def webapp_index() -> FileResponse:
+                """Serve the Mini App entrypoint without a scheme-breaking redirect."""
+                return FileResponse(index_file)
+
         app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="webapp")
 
     return app

@@ -127,6 +127,30 @@ export interface BoardResponse {
   meta: { limit: number; offset: number };
 }
 
+export interface JobPostResponseItem {
+  id: number;
+  job_post_id: number;
+  status: string;
+  message: string;
+  price_offer: number | null;
+  eta_label: string | null;
+  created_at: string | null;
+  responder: {
+    id: number;
+    external_id: number;
+    name: string;
+    username: string | null;
+  };
+}
+
+export interface JobPostResponseList {
+  post: JobPost;
+  items: JobPostResponseItem[];
+  meta: {
+    count: number;
+  };
+}
+
 export interface NetworkResponse {
   items: MasterCard[];
   meta: { limit: number; offset: number };
@@ -323,6 +347,30 @@ export interface ControlBranch {
   member_count: number;
 }
 
+export interface ControlBranchMemberPreview {
+  user_id: number;
+  external_user_id: number | null;
+  name: string;
+  is_senior: boolean;
+  is_active: boolean;
+  completed_orders: number;
+}
+
+export interface ControlBranchOverview {
+  id: number;
+  name: string;
+  is_active: boolean;
+  senior_master_id: number | null;
+  senior_name: string | null;
+  member_count: number;
+  active_master_count: number;
+  estimate_count: number;
+  completed_orders: number;
+  revenue: number;
+  senior_share: number;
+  members: ControlBranchMemberPreview[];
+}
+
 export interface ControlUser {
   user_id: number;
   external_user_id: number;
@@ -420,6 +468,66 @@ export interface ControlFeatureFlag {
   enabled: boolean;
 }
 
+export interface ControlInsightCommission {
+  id: number;
+  order_id: number | null;
+  gross_total: number;
+  platform_fee: number;
+  master_net: number;
+  calculated_at: string | null;
+}
+
+export interface ControlInsightMaster {
+  user_id: number;
+  external_user_id: number | null;
+  name: string;
+  order_count: number;
+  revenue: number;
+}
+
+export interface ControlInsights {
+  overview: {
+    users: number;
+    masters: number;
+    estimates: number;
+    orders: number;
+    gross: number;
+    platform_net: number;
+  };
+  finance: {
+    gross: number;
+    platform_fee: number;
+    senior_share: number;
+    admin_share: number;
+    platform_net: number;
+    master_net: number;
+    discounts_total: number;
+    recent_commissions: ControlInsightCommission[];
+  };
+  funnel: Record<string, number>;
+  masters: ControlInsightMaster[];
+  discounts: {
+    total_requests: number;
+    approved: number;
+    rejected: number;
+    pending: number;
+    total_amount: number;
+    approval_rate: number;
+  };
+  settings: {
+    platform_name: string;
+    platform_operator_name: string;
+    platform_fee_pct: number;
+    senior_master_share_pct: number;
+    admin_share_pct: number;
+    default_city: string;
+    default_region: string;
+    ai_provider: string;
+    app_env: string;
+    webapp_url: string;
+  };
+}
+
 export interface ControlListMeta {
   limit: number;
   offset: number;
@@ -429,6 +537,8 @@ export interface ControlListMeta {
 export interface ControlBootstrapResponse {
   capabilities: {
     can_view_team: boolean;
+    can_manage_users: boolean;
+    can_manage_branches: boolean;
     can_create_invites: boolean;
     can_moderate_invites: boolean;
     can_initiate_staffing: boolean;
@@ -437,9 +547,16 @@ export interface ControlBootstrapResponse {
   };
   ui: {
     invite_role_options: RoleOption[];
+    role_management_options: RoleOption[];
     staffing_action_options: RoleOption[];
   };
   branches: ControlBranch[];
+  branch_overview: {
+    items: ControlBranchOverview[];
+    meta: {
+      count: number;
+    };
+  };
   users: {
     items: ControlUser[];
     meta: ControlListMeta;
@@ -457,6 +574,7 @@ export interface ControlBootstrapResponse {
     meta: ControlListMeta;
   };
   flags: ControlFeatureFlag[];
+  insights: ControlInsights | null;
 }
 
 export interface ApprovalItem {

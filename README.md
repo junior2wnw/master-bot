@@ -184,6 +184,16 @@ npm run build
 - [docs/db_schema.md](docs/db_schema.md)
 - [ROADMAP.md](ROADMAP.md)
 
+## MAX production notes
+
+- In MAX settings and in server-side configs for the IDN domain, use the ASCII URL `https://4-2.xn--p1ai/app`.
+- Keep `https://4-2.рф/app` as the public-facing display URL for users, but do not rely on it for MAX admin/config screens.
+- The Mini App entrypoint must answer on exact `/app` without a redirect to `http://.../app/`, otherwise MAX may show a native technical error before frontend code starts.
+- The frontend and backend both support signed launch data delivered either via `window.WebApp.initData` or via URL fragment `#WebAppData=...`.
+- Control Center in the Mini App now covers team, roles, branches, invites, staffing, owner insights, and feature flags, so routine operations no longer depend on Telegram-only callback flows.
+- The canonical production reverse proxy config now lives in [Caddyfile](Caddyfile), and its upstream must stay on the stable Docker service alias `app:8000`.
+- `deploy/setup.sh` now recreates `pridel-caddy` from the repo `Caddyfile` so a backend rebuild cannot leave production on a stale proxy target.
+
 ## English
 
 PriDel is a service workflow platform for field specialists with a MAX bot, MAX Mini App, FastAPI backend, PostgreSQL, and Redis. The repo is structured as a modular monolith so the same business logic can power bot actions, Mini App screens, exports, approvals, and notifications.
