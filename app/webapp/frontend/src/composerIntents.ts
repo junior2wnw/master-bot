@@ -59,9 +59,9 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
     recommendations.push(
       openRecommendation(ctx, {
         id: "general-notifications",
-        label: "Сигналы рядом",
+        label: "Сигналы",
         title: "Открыть уведомления",
-        body: "Непрочитанные сигналы стоит держать рядом с текущей работой, а не искать потом.",
+        body: "Держите уведомления рядом с работой.",
         panelId: "notifications-list",
       }),
     );
@@ -71,9 +71,9 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
     recommendations.push(
       openRecommendation(ctx, {
         id: "general-estimates",
-        label: "Сметы в фокус",
+        label: "Сметы",
         title: "Открыть сметы",
-        body: "Активные сметы лучше держать на виду, чтобы быстрее двигать работу к заказу.",
+        body: "Откройте активные сметы рядом.",
         panelId: "estimates-list",
       }),
     );
@@ -83,9 +83,9 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
     recommendations.push(
       openRecommendation(ctx, {
         id: "general-orders",
-        label: "Заказы рядом",
+        label: "Заказы",
         title: "Открыть заказы",
-        body: "Если уже есть живая работа, ей нужен отдельный контекст рядом с рынком и профилем.",
+        body: "Держите активные заказы под рукой.",
         panelId: "orders-list",
       }),
     );
@@ -99,9 +99,9 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
     recommendations.push(
       openRecommendation(ctx, {
         id: "general-profile",
-        label: "Доверие профиля",
+        label: "Профиль",
         title: "Доработать профиль",
-        body: "Телефон и специализация нужны, чтобы сеть мастеров и отклики выглядели надёжно.",
+        body: "Заполните профиль для откликов и сети.",
         panelId: "profile-card",
         profileScenario: true,
       }),
@@ -116,9 +116,9 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
     recommendations.push(
       openRecommendation(ctx, {
         id: "general-approvals",
-        label: "Очередь решений",
+        label: "Согласования",
         title: "Открыть согласования",
-        body: "Очередь approvals не стоит прятать глубоко, если по ней уже есть хвост.",
+        body: "Есть решения, которые ждут вас.",
         panelId: "approvals-queue",
       }),
     );
@@ -128,9 +128,9 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
     recommendations.push(
       openRecommendation(ctx, {
         id: "general-board",
-        label: "Вернуться к спросу",
+        label: "Доска",
         title: "Открыть доску",
-        body: "Когда нет явного next step, безопаснее держать рядом живой спрос и не терять входящий рынок.",
+        body: "Вернитесь к новым заявкам.",
         panelId: "board-feed",
       }),
     );
@@ -138,8 +138,8 @@ export function buildGeneralIntent(ctx: ContextShape): ComposerIntentSurface {
 
   return {
     kind: "general",
-    title: "Composer сам подсказывает следующий шаг",
-    body: "Мы держим рядом только те окна, которые реально двигают текущую задачу, а не засоряют поверхность.",
+    title: "Следующий шаг уже рядом",
+    body: "Только нужные окна и действия.",
     recommendations: recommendations.slice(0, 4),
   };
 }
@@ -151,9 +151,9 @@ export function buildEstimateIntent(ctx: ContextShape, estimate: EstimateDetail)
     recommendations.push(
       openRecommendation(ctx, {
         id: "estimate-catalog",
-        label: "Каталог рядом",
+        label: "Каталог",
         title: "Добавлять позиции без лишнего хождения",
-        body: "Черновик сметы лучше собирать с открытым каталогом рядом, чтобы не прыгать между режимами.",
+        body: "Добавляйте позиции прямо рядом со сметой.",
         panelId: "catalog-browser",
       }),
     );
@@ -163,9 +163,9 @@ export function buildEstimateIntent(ctx: ContextShape, estimate: EstimateDetail)
     recommendations.push(
       openRecommendation(ctx, {
         id: "estimate-orders",
-        label: "Перевести в заказ",
+        label: "В заказ",
         title: "Держать заказы рядом со сметой",
-        body: "Согласованную смету логично сразу переводить в работу, не теряя контекста стоимости.",
+        body: "Переведите согласованную смету в работу.",
         panelId: "orders-list",
       }),
     );
@@ -175,9 +175,9 @@ export function buildEstimateIntent(ctx: ContextShape, estimate: EstimateDetail)
     recommendations.push(
       openRecommendation(ctx, {
         id: "estimate-signals",
-        label: "Ответ клиента",
+        label: "Ответ",
         title: "Открыть сигналы рядом",
-        body: "Когда смета у клиента, рядом полезно держать уведомления, чтобы не пропустить ответ или замечание.",
+        body: "Проверьте ответ клиента рядом со сметой.",
         panelId: "notifications-list",
       }),
     );
@@ -191,9 +191,9 @@ export function buildEstimateIntent(ctx: ContextShape, estimate: EstimateDetail)
     recommendations.push(
       openRecommendation(ctx, {
         id: "estimate-approvals",
-        label: "Очередь approvals",
+        label: "Согласования",
         title: "Подтянуть согласования",
-        body: "Если по скидкам и решениям уже есть хвост, держите очередь рядом со сметой.",
+        body: "Рядом есть очередь решений.",
         panelId: "approvals-queue",
       }),
     );
@@ -201,8 +201,8 @@ export function buildEstimateIntent(ctx: ContextShape, estimate: EstimateDetail)
 
   return {
     kind: "estimate",
-    title: `Смета #${estimate.id} в фокусе`,
-    body: "Composer собирает вокруг сметы только те окна, которые помогают довести её до согласования и заказа.",
+    title: `Смета #${estimate.id}`,
+    body: "Рядом только нужные шаги по смете.",
     recommendations: recommendations.slice(0, 4),
   };
 }
@@ -214,9 +214,9 @@ export function buildOrderIntent(ctx: ContextShape, order: OrderDetail): Compose
     recommendations.push(
       openRecommendation(ctx, {
         id: "order-estimate",
-        label: "Смета рядом",
+        label: "Смета",
         title: "Держать смету рядом с заказом",
-        body: "Так проще сверять состав работ, сумму и переходить к изменениям без потери контекста.",
+        body: "Сверяйте состав и сумму без лишних переходов.",
         panelId: "estimates-list",
         estimateId: order.estimate.id,
       }),
@@ -227,9 +227,9 @@ export function buildOrderIntent(ctx: ContextShape, order: OrderDetail): Compose
     recommendations.push(
       openRecommendation(ctx, {
         id: "order-signals",
-        label: "Сигналы рядом",
+        label: "Сигналы",
         title: "Открыть уведомления рядом с заказом",
-        body: "У активной работы сигналы и статусы лучше держать рядом, чем вспоминать о них позже.",
+        body: "Статусы и события рядом с заказом.",
         panelId: "notifications-list",
       }),
     );
@@ -243,9 +243,9 @@ export function buildOrderIntent(ctx: ContextShape, order: OrderDetail): Compose
     recommendations.push(
       openRecommendation(ctx, {
         id: "order-network",
-        label: "Репутация мастеров",
+        label: "Мастера",
         title: "Открыть сеть мастеров",
-        body: "После завершения сделки полезно держать под рукой публичный контекст мастеров и доверия.",
+        body: "Откройте сеть мастеров и отзывы.",
         panelId: "network-directory",
       }),
     );
@@ -253,8 +253,8 @@ export function buildOrderIntent(ctx: ContextShape, order: OrderDetail): Compose
 
   return {
     kind: "order",
-    title: `Заказ #${order.id} в фокусе`,
-    body: "Вокруг активного заказа мы подбираем только окна исполнения: смету, сигналы и доверительный контекст.",
+    title: `Заказ #${order.id}`,
+    body: "Рядом только исполнение и статусы.",
     recommendations: recommendations.slice(0, 4),
   };
 }
@@ -269,9 +269,9 @@ export function buildProfileIntent(
     recommendations.push(
       openRecommendation(ctx, {
         id: "profile-network",
-        label: "Витрина рядом",
+        label: "Витрина",
         title: "Открыть сеть мастеров рядом",
-        body: "Так проще сразу видеть, как профиль выглядит в живом рынке, а не только в форме.",
+        body: "Посмотрите, как профиль выглядит в сети.",
         panelId: "network-directory",
       }),
     );
@@ -281,9 +281,9 @@ export function buildProfileIntent(
     recommendations.push(
       openRecommendation(ctx, {
         id: "profile-board",
-        label: "Спрос рядом",
+        label: "Спрос",
         title: "Держать рынок рядом с профилем",
-        body: "Когда профиль ещё сырой, полезно видеть спрос и понимать, под какие задачи его довести.",
+        body: "Посмотрите спрос и подтяните профиль под него.",
         panelId: "board-feed",
       }),
     );
@@ -291,8 +291,8 @@ export function buildProfileIntent(
 
   return {
     kind: "profile",
-    title: "Профиль как рабочая опора",
-    body: "Профиль нужен не сам по себе, а как точка доверия между спросом, сетью мастеров и текущей работой.",
+    title: "Профиль",
+    body: "Заполните главное и смотрите рынок рядом.",
     recommendations: recommendations.slice(0, 4),
   };
 }
@@ -305,9 +305,9 @@ export function buildNotificationIntent(ctx: ContextShape, notification: Notific
     recommendations.push(
       openRecommendation(ctx, {
         id: `notification-order-${notification.id}`,
-        label: "Заказ рядом",
+        label: "Заказ",
         title: "Открыть заказ рядом с уведомлениями",
-        body: "Так уведомление не теряется после перехода, а живёт рядом с исполнением.",
+        body: "Откройте заказ рядом с уведомлением.",
         panelId: "orders-list",
         workflowCallback: callback,
       }),
@@ -317,9 +317,9 @@ export function buildNotificationIntent(ctx: ContextShape, notification: Notific
     recommendations.push(
       openRecommendation(ctx, {
         id: `notification-estimate-${notification.id}`,
-        label: "Смета рядом",
+        label: "Смета",
         title: "Открыть смету рядом с уведомлениями",
-        body: "Сигналы по смете удобнее разбирать, когда сам документ открыт рядом.",
+        body: "Откройте смету рядом с уведомлением.",
         panelId: "estimates-list",
         workflowCallback: callback,
       }),
@@ -329,7 +329,7 @@ export function buildNotificationIntent(ctx: ContextShape, notification: Notific
   return {
     kind: "notification",
     title: notification.title,
-    body: "При переходе из уведомления composer старается не терять сам источник сигнала и соседний рабочий модуль.",
+    body: "Сигнал и рабочий модуль остаются рядом.",
     recommendations: recommendations.slice(0, 3),
   };
 }

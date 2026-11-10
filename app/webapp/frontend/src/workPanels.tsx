@@ -27,22 +27,32 @@ export function WorkspacePanel({
   if (typeof bootstrap.workspace.total_earned === "number") {
     metrics.push({ label: "Заработано", value: `${money(bootstrap.workspace.total_earned)} ₽` });
   }
+  const nextSteps = [
+    ...bootstrap.workspace.action_items.slice(0, isCompact ? 2 : 3).map((task) => ({
+      id: `workflow-${task.callback}`,
+      title: task.title,
+      meta: "Сейчас",
+      onClick: () => onOpenWorkflow(task.callback),
+    })),
+    ...bootstrap.workspace.onboarding.slice(0, isCompact ? 1 : 2).map((task) => ({
+      id: `setup-${task.id}`,
+      title: task.title,
+      meta: "Профиль",
+      onClick: () => onFocusPanel("bottom", "profile-card"),
+    })),
+  ].slice(0, isCompact ? 3 : 4);
 
   return (
     <div className={`panel-stack workspace-pane ${isCompact ? "compact-market-pane" : ""}`}>
       <section className={`${isCompact ? "section-card compact-hero-card" : "market-overview section-card"}`}>
         <div className="market-overview-copy">
           <span className="eyebrow">Рабочий стол</span>
-          <h3>{isCompact ? "Главное по делу без длинного меню" : "Только те действия, которые реально двигают работу вперёд"}</h3>
-          <p>
-            {isCompact
-              ? "Сначала видно, что требует внимания прямо сейчас, а затем уже детали."
-              : "Здесь нет перегруженного меню. Есть понятная сводка, короткий список следующего шага и быстрые переходы туда, где можно принять решение."}
-          </p>
+          <h3>{isCompact ? "Главное сейчас" : "Текущая работа без перегруза"}</h3>
+          <p>{isCompact ? "Числа, шаги и переходы." : "Сводка, следующий шаг и быстрые переходы."}</p>
         </div>
       </section>
 
-      <SectionCard title={isCompact ? "На сейчас" : "Сводка на сейчас"} subtitle={isCompact ? "Только живые числа, без лишних объяснений." : "Ситуация по делу, без лишних таблиц."}>
+      <SectionCard title={isCompact ? "Сейчас" : "Сводка"}>
         <div className={`metric-grid ${isCompact ? "metric-grid-compact" : ""}`}>
           {metrics.map((metric) => (
             <div key={metric.label} className="metric-card">
@@ -53,33 +63,20 @@ export function WorkspacePanel({
         </div>
       </SectionCard>
 
-      {bootstrap.workspace.action_items.length ? (
-        <SectionCard title={isCompact ? "Что делать дальше" : "Следующий лучший шаг"} subtitle="Нажимать стоит только туда, где есть смысл действовать.">
+      {nextSteps.length ? (
+        <SectionCard title="Дальше">
           <div className="task-list">
-            {bootstrap.workspace.action_items.map((task) => (
-              <button key={task.callback} className="task-card" onClick={() => onOpenWorkflow(task.callback)}>
-                <strong>{task.title}</strong>
-                <span>{task.body}</span>
+            {nextSteps.map((step) => (
+              <button key={step.id} className="task-card task-card-compact" onClick={step.onClick}>
+                <strong>{step.title}</strong>
+                <span>{step.meta}</span>
               </button>
             ))}
           </div>
         </SectionCard>
       ) : null}
 
-      {bootstrap.workspace.onboarding.length ? (
-        <SectionCard title={isCompact ? "Что усилит доверие" : "Что усилит доверие"} subtitle="Пара небольших шагов, которые повышают конверсию и качество сделок.">
-          <div className="task-list">
-            {bootstrap.workspace.onboarding.map((task) => (
-              <button key={task.id} className="task-card" onClick={() => onFocusPanel("bottom", "profile-card")}>
-                <strong>{task.title}</strong>
-                <span>{task.description}</span>
-              </button>
-            ))}
-          </div>
-        </SectionCard>
-      ) : null}
-
-      <SectionCard title={isCompact ? "Куда перейти" : "Быстрые переходы"} subtitle="Там, где люди чаще всего хотят оказаться за один тап.">
+      <SectionCard title={isCompact ? "Перейти" : "Быстрые переходы"}>
         <div className={`quick-grid ${isCompact ? "quick-grid-compact" : ""}`}>
           {[
             { label: "Каталог", pane: "top" as PaneId, panel: "catalog-browser" },
@@ -147,7 +144,7 @@ export function CatalogPanel({
 
   return (
     <div className="panel-stack">
-      <SectionCard title="Собрать смету" subtitle="Поиск по работам без длинных деревьев и лишних кликов.">
+      <SectionCard title="Собрать смету">
         <input
           className="input"
           placeholder="Например: розетка, люстра, смеситель"
@@ -158,7 +155,7 @@ export function CatalogPanel({
       </SectionCard>
       <div className="card-list">
         {deferredQueryText.length < 2 ? (
-          <EmptyState title="Начните с двух символов" subtitle="Интерфейс остаётся лёгким и не грузит лишние результаты заранее." />
+          <EmptyState title="Начните поиск" subtitle="Минимум 2 символа." />
         ) : searchQuery.data?.length ? (
           searchQuery.data.map((item) => (
             <article key={item.id} className="glass-card compact-card">
@@ -176,7 +173,7 @@ export function CatalogPanel({
             </article>
           ))
         ) : (
-          <EmptyState title="Ничего не нашли" subtitle="Попробуйте более общий запрос или короткое название работы." />
+          <EmptyState title="Ничего не нашли" subtitle="Попробуйте короче или шире запрос." />
         )}
       </div>
     </div>
@@ -211,7 +208,6 @@ export function EstimatesPanel({
     <div className="panel-stack">
       <SectionCard
         title="Сметы"
-        subtitle="Черновики, ответы клиентов и готовые предложения в одном понятном потоке."
         actions={
           canCreateEstimate ? (
             <button className="btn btn-primary" onClick={() => void createMutation.mutateAsync()}>
@@ -236,14 +232,7 @@ export function EstimatesPanel({
             </button>
           ))
         ) : (
-          <EmptyState
-            title="Смет пока нет"
-            subtitle={
-              canCreateEstimate
-                ? "Каталог и рынок помогут создать первую смету без лишних шагов."
-                : "Когда мастер подготовит предложение или вы откроете его сами, сметы появятся здесь."
-            }
-          />
+          <EmptyState title="Смет пока нет" subtitle={canCreateEstimate ? "Создайте первую." : "Они появятся после запуска."} />
         )}
       </div>
     </div>
@@ -264,7 +253,7 @@ export function OrdersPanel({
 
   return (
     <div className="panel-stack">
-      <SectionCard title="Заказы" subtitle="Вся активная работа и история её состояний в одном потоке." />
+      <SectionCard title="Заказы" />
       <div className="card-list">
         {ordersQuery.data?.length ? (
           ordersQuery.data.map((order: OrderSummary) => (
@@ -281,7 +270,7 @@ export function OrdersPanel({
             </button>
           ))
         ) : (
-          <EmptyState title="Заказов пока нет" subtitle="Они появятся здесь после согласования смет и запуска работы." />
+          <EmptyState title="Заказов пока нет" subtitle="Они появятся после запуска работы." />
         )}
       </div>
     </div>
@@ -311,7 +300,7 @@ export function NotificationsPanel({
 
   return (
     <div className="panel-stack">
-      <SectionCard title="Уведомления" subtitle="Только значимые события, без лишнего шумового канала." />
+      <SectionCard title="Уведомления" />
       <div className="card-list">
         {notificationsQuery.data?.length ? (
           notificationsQuery.data.map((notification: NotificationItem) => (
@@ -339,7 +328,7 @@ export function NotificationsPanel({
             </article>
           ))
         ) : (
-          <EmptyState title="Пусто" subtitle="Когда появятся реальные события, они всплывут здесь компактной лентой." />
+          <EmptyState title="Пусто" subtitle="Новые события появятся здесь." />
         )}
       </div>
     </div>
@@ -369,7 +358,7 @@ export function ApprovalsPanel({ externalUserId }: { externalUserId: number }) {
 
   return (
     <div className="panel-stack">
-      <SectionCard title="Согласования" subtitle="Очередь решений без перегруза деталями." />
+      <SectionCard title="Согласования" />
       <div className="card-list">
         {approvalsQuery.data?.length ? (
           approvalsQuery.data.map((approval) => (
@@ -412,7 +401,7 @@ export function ApprovalsPanel({ externalUserId }: { externalUserId: number }) {
             </article>
           ))
         ) : (
-          <EmptyState title="Очередь чистая" subtitle="Сейчас нет решений, которые требуют вашего участия." />
+          <EmptyState title="Очередь чистая" subtitle="Решений пока нет." />
         )}
       </div>
     </div>
@@ -427,7 +416,7 @@ export function AnalyticsPanel({ externalUserId }: { externalUserId: number }) {
 
   return (
     <div className="panel-stack">
-      <SectionCard title="Аналитика платформы" subtitle="Одна плоскость для экономики и воронки.">
+      <SectionCard title="Аналитика">
         {analyticsQuery.data ? (
           <div className="metric-grid dense">
             {[
@@ -445,7 +434,7 @@ export function AnalyticsPanel({ externalUserId }: { externalUserId: number }) {
             ))}
           </div>
         ) : (
-          <EmptyState title="Считаем..." subtitle="Аналитика появится сразу после ответа сервера." />
+          <EmptyState title="Считаем..." subtitle="Собираем данные." />
         )}
       </SectionCard>
     </div>

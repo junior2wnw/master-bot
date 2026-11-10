@@ -298,7 +298,7 @@ export function ReviewCard({ review }: { review: MasterReviewItem }) {
       <div className="meta-cloud">
         <span>Заказ #{review.order_id}</span>
         <span>{review.author.name}</span>
-        <span>{review.is_public ? "Публичный отзыв" : "Частный отзыв"}</span>
+        <span>{review.is_public ? "Публично" : "Частно"}</span>
       </div>
     </article>
   );
@@ -385,9 +385,9 @@ export function SpotlightHero({
   onOpenProfile: () => void;
 }) {
   const summaryCards = [
-    { label: compact ? "Спрос" : "Заказы на рынке", value: bootstrap.board.total },
-    { label: compact ? "Мастера" : "Мастеров в сети", value: bootstrap.network.total },
-    { label: compact ? "Работа" : "Активных заказов", value: bootstrap.workspace.active_orders },
+    { label: compact ? "Спрос" : "Заявки", value: bootstrap.board.total },
+    { label: compact ? "Мастера" : "Мастера", value: bootstrap.network.total },
+    { label: compact ? "Работа" : "Заказы", value: bootstrap.workspace.active_orders },
     { label: "Сигналы", value: bootstrap.notifications.unread },
   ];
   const compactSummaryCards = compact ? summaryCards.filter((card) => card.value > 0).slice(0, 3) : summaryCards;
@@ -400,16 +400,12 @@ export function SpotlightHero({
           <div>
             <span className="eyebrow">4-2 • ПриДел</span>
             <h1>{auth.name}</h1>
-            <p className="hero-role">{compact ? activeRoleLabel : `${activeRoleLabel}${maxRoleLabel && maxRoleLabel !== activeRoleLabel ? ` • потолок ${maxRoleLabel}` : ""}`}</p>
+            <p className="hero-role">{compact ? activeRoleLabel : `${activeRoleLabel}${maxRoleLabel && maxRoleLabel !== activeRoleLabel ? ` • ${maxRoleLabel}` : ""}`}</p>
           </div>
         </div>
         <div className="hero-copy">
-          <h2>{compact ? "Окна под рукой, а не лишние экраны" : "Светлый composer для спроса, мастеров и выполнения работ"}</h2>
-          <p>
-            {compact
-              ? "Тап переключает режим. Удержание добавляет окно рядом. Двойной тап по заголовку включает фокус."
-              : "ПриДел собирается как живая рабочая поверхность: рынок, сеть мастеров и операционные потоки открываются окнами и не ломают общий контекст."}
-          </p>
+          <h2>{compact ? "Всё главное на одном экране" : "Понятная поверхность для заявок, мастеров и заказов"}</h2>
+          <p>{compact ? "Тап — перейти. Удержание — добавить окно." : "Открывайте нужное без лишних переходов."}</p>
         </div>
         <div className={`hero-actions ${compact ? "hero-actions-compact" : ""}`}>
           <button className="btn btn-primary" data-testid="hero-preset-market" onClick={() => onSelectPreset("market")}>
